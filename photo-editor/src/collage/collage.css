@@ -1,0 +1,63 @@
+.collage-layout {
+    display: flex;
+    gap: var(--spacing-xl);
+    flex-wrap: wrap;
+}
+
+.collage-sidebar {
+    flex: 1;
+    min-width: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+.collage-workspace {
+    flex: 2;
+    min-width: 300px;
+    background-color: #525252;
+    /* Neutral gray for canvas contrast */
+    padding: var(--spacing-xl);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: var(--radius-md);
+    overflow: auto;
+}
+
+#collage-canvas {
+    background-color: white;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    max-width: 100%;
+    height: auto;
+    cursor: grab;
+}
+
+#collage-canvas:active {
+    cursor: grabbing;
+}
+
+.panel {
+    background-color: var(--color-bg-tertiary);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+}
+
+.panel h3 {
+    margin-top: 0;
+    margin-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: var(--spacing-sm);
+}
+
+.tool-row {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.color-picker {
+    height: 40px;
+    padding: 2px;
+}
