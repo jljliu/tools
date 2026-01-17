@@ -112,7 +112,18 @@ const useStore = create((set, get) => ({
 
     addMessage: async (role, content, images = []) => {
         const { activeChatId, messages, chats } = get();
-        if (!activeChatId) return;
+        if (!activeChatId) {
+            // Auto-recover if no chat is active (e.g. init failure)
+            console.warn('No active chat found, creating temporary chat');
+            // If we can't save to DB, at least let it work in memory
+            // Just proceed? No, we need an ID.
+            // We'll call createNewChat but we need to wait for it.
+            // Actually, createNewChat saves to DB. 
+            // Let's just generate a temp ID if none exists, but createNewChat is cleaner if it handles errors.
+            await get().createNewChat();
+            // Retry?
+            return get().addMessage(role, content, images);
+        }
 
         const newMessage = {
             id: crypto.randomUUID(),

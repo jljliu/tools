@@ -47,8 +47,8 @@ export default function MessageBubble({ message }) {
 
                 <div className="prose prose-invert prose-sm max-w-none break-words text-gray-100/90 leading-7">
                     <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeHighlight]}
+                        // remarkPlugins={[remarkGfm]}
+                        // rehypePlugins={[rehypeHighlight]}
                         components={{
                             code({ node, inline, className, children, ...props }) {
                                 const match = /language-(\w+)/.exec(className || '')
