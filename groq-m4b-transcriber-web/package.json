@@ -1,0 +1,20 @@
+{
+  "name": "groq-m4b-transcriber-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@ricky0123/vad-web": "^0.0.27",
+    "onnxruntime-web": "^1.17.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

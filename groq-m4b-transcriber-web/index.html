@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Groq M4B Transcriber</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <h1>Groq M4B Transcriber</h1>
+        <p>Browser-only transcription with VAD chunking and direct Groq API calls.</p>
+      </header>
+
+      <section class="panel">
+        <label class="field">
+          <span>Audio book file (.m4b/.mp3/.m4a)</span>
+          <input id="audioFile" type="file" accept="audio/*,.m4b" />
+        </label>
+
+        <label class="field">
+          <span>Groq API key</span>
+          <input id="apiKey" type="password" placeholder="gsk_..." autocomplete="off" />
+        </label>
+
+        <div class="row">
+          <label class="field">
+            <span>Model</span>
+            <input id="model" type="text" value="whisper-large-v3-turbo" />
+          </label>
+
+          <label class="field">
+            <span>Language (optional)</span>
+            <input id="language" type="text" placeholder="en" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="field">
+            <span>Min speech ms</span>
+            <input id="minSpeechMs" type="number" value="400" min="100" step="50" />
+          </label>
+
+          <label class="field">
+            <span>Min silence ms</span>
+            <input id="minSilenceMs" type="number" value="500" min="100" step="50" />
+          </label>
+
+          <label class="field">
+            <span>Max chunk sec (fallback)</span>
+            <input id="maxChunkSec" type="number" value="600" min="30" step="30" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="startBtn" type="button">Start Transcription</button>
+          <button id="downloadBtn" type="button" disabled>Download Transcript</button>
+        </div>
+
+        <p class="warning">
+          Security note: this is a static frontend. Your API key stays in-browser, but any key used client-side can be extracted by end users.
+        </p>
+
+        <pre id="status" class="status">Idle.</pre>
+      </section>
+
+      <section class="panel">
+        <h2>Transcript</h2>
+        <textarea id="transcript" rows="20" placeholder="Transcription output appears here..."></textarea>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
