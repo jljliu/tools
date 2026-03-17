@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import * as StackBlur from 'stackblur-canvas';
 import './App.css';
 
 function App() {
@@ -10,6 +11,11 @@ function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectionBox, setSelectionBox] = useState(null); // {x, y, w, h}
   const [startPos, setStartPos] = useState(null);
+
+  // Interaction state
+  const [dragMode, setDragMode] = useState(null); // 'draw', 'move', 'nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'
+  const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
+  const [hoverMode, setHoverMode] = useState(null);
 
   const canvasRef = useRef(null);
   const imageElementRef = useRef(null);
@@ -35,54 +41,51 @@ function App() {
     const ctx = canvas.getContext('2d');
     const img = imageElementRef.current;
 
-    // Set canvas size to match image
     canvas.width = img.width;
     canvas.height = img.height;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Draw blurred base image
-    ctx.filter = `blur(${blurLevel}px)`;
+    // 1. Draw base image
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.filter = 'none'; // reset filter
+    
+    // Process software blur
+    if (blurLevel > 0) {
+      StackBlur.canvasRGBA(canvas, 0, 0, canvas.width, canvas.height, blurLevel);
+    }
 
     // 2. Draw dim overlay
     ctx.fillStyle = `rgba(0, 0, 0, ${dimLevel})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 3. Draw highlighted selection (if exists)
+    // 3. Draw highlighted selection
     if (selectionBox && selectionBox.w !== 0 && selectionBox.h !== 0) {
       let { x, y, w, h } = selectionBox;
 
-      // Handle negative width/height from dragging backwards
       if (w < 0) { x += w; w = Math.abs(w); }
       if (h < 0) { y += h; h = Math.abs(h); }
 
       ctx.save();
       ctx.beginPath();
-      // Optionally add rounded corners to the clip
       const radius = 8;
       ctx.roundRect(x, y, w, h, radius);
       ctx.clip();
 
-      // Draw the crisp, unblurred, undimmed original image in the clipped region
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       ctx.restore();
 
-      // 4. Draw a premium glow/stroke around the selection
+      // 4. Draw stroke
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, radius);
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
       ctx.stroke();
       
-      // Outer subtle glow
       ctx.lineWidth = 1;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.shadowColor = 'rgba(255, 255, 255, 0.6)';
       ctx.shadowBlur = 15;
       ctx.stroke();
-      ctx.shadowBlur = 0; // reset
+      ctx.shadowBlur = 0;
     }
   };
 
@@ -92,9 +95,9 @@ function App() {
 
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     
-    // Calculate scale factor between rendered size and actual pixel size
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
@@ -104,29 +107,149 @@ function App() {
     };
   };
 
+  const getHitZone = (pos, box) => {
+    if (!box || box.w === 0 || box.h === 0) return null;
+    let { x, y, w, h } = box;
+    if (w < 0) { x += w; w = Math.abs(w); }
+    if (h < 0) { y += h; h = Math.abs(h); }
+    
+    // Scale margin so grab area is easy regardless of image size
+    const canvas = canvasRef.current;
+    const scaleX = canvas ? canvas.width / canvas.getBoundingClientRect().width : 1;
+    const margin = 10 * scaleX; 
+
+    const right = x + w;
+    const bottom = y + h;
+
+    const onLeft = pos.x >= x - margin && pos.x <= x + margin;
+    const onRight = pos.x >= right - margin && pos.x <= right + margin;
+    const onTop = pos.y >= y - margin && pos.y <= y + margin;
+    const onBottom = pos.y >= bottom - margin && pos.y <= bottom + margin;
+
+    const insideX = pos.x > x - margin && pos.x < right + margin;
+    const insideY = pos.y > y - margin && pos.y < bottom + margin;
+    
+    const strictlyInsideX = pos.x > x + margin && pos.x < right - margin;
+    const strictlyInsideY = pos.y > y + margin && pos.y < bottom - margin;
+
+    if (onTop && onLeft) return 'nw';
+    if (onTop && onRight) return 'ne';
+    if (onBottom && onLeft) return 'sw';
+    if (onBottom && onRight) return 'se';
+    if (onTop && insideX) return 'n';
+    if (onBottom && insideX) return 's';
+    if (onLeft && insideY) return 'w';
+    if (onRight && insideY) return 'e';
+    if (strictlyInsideX && strictlyInsideY) return 'move';
+    
+    return null;
+  };
+
+  const onCanvasMouseMove = (e) => {
+    if (isDrawing) return;
+    const pos = getCanvasCoordinates(e);
+    const zone = getHitZone(pos, selectionBox);
+    setHoverMode(zone);
+  };
+
   const onMouseDown = (e) => {
     if (!image) return;
     const pos = getCanvasCoordinates(e);
+    const zone = getHitZone(pos, selectionBox);
+    
     setIsDrawing(true);
     setStartPos(pos);
-    setSelectionBox({ x: pos.x, y: pos.y, w: 0, h: 0 });
+
+    if (zone) {
+      setDragMode(zone);
+      if (zone === 'move') {
+        let { x, y, w, h } = selectionBox;
+        if (w < 0) { x += w; w = Math.abs(w); }
+        if (h < 0) { y += h; h = Math.abs(h); }
+        setDragOffset({ dx: pos.x - x, dy: pos.y - y });
+      } else {
+        // We are resizing an edge, need to preserve the normalized box as the anchor
+        let { x, y, w, h } = selectionBox;
+        if (w < 0) { x += w; w = Math.abs(w); }
+        if (h < 0) { y += h; h = Math.abs(h); }
+        setSelectionBox({ x, y, w, h }); // lock normalized
+      }
+    } else {
+      setDragMode('draw');
+      setSelectionBox({ x: pos.x, y: pos.y, w: 0, h: 0 });
+    }
   };
 
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isDrawing || !startPos) return;
-      // Allow dragging outside the canvas by capturing global mouse events
       const currentPos = getCanvasCoordinates(e);
-      setSelectionBox({
-        x: startPos.x,
-        y: startPos.y,
-        w: currentPos.x - startPos.x,
-        h: currentPos.y - startPos.y,
+      
+      setSelectionBox(prev => {
+        if (!prev) return prev;
+        
+        // Always use normalized variables for boundary math
+        let { x, y, w, h } = prev;
+        let nx = x, ny = y, nw = w, nh = h;
+        if (nw < 0) { nx += nw; nw = Math.abs(nw); }
+        if (nh < 0) { ny += nh; nh = Math.abs(nh); }
+        let activeBox = { x: nx, y: ny, w: nw, h: nh };
+
+        if (dragMode === 'draw') {
+          return {
+            x: startPos.x,
+            y: startPos.y,
+            w: currentPos.x - startPos.x,
+            h: currentPos.y - startPos.y,
+          };
+        } else if (dragMode === 'move') {
+          return {
+            x: currentPos.x - dragOffset.dx,
+            y: currentPos.y - dragOffset.dy,
+            w: activeBox.w,
+            h: activeBox.h,
+          };
+        } else {
+          // Resize logic based on dragMode
+          let newX = activeBox.x;
+          let newY = activeBox.y;
+          let newW = activeBox.w;
+          let newH = activeBox.h;
+
+          // For edges, we freeze the opposite side
+          if (dragMode.includes('w')) {
+             const dx = currentPos.x - activeBox.x;
+             newX = currentPos.x;
+             newW = activeBox.w - dx;
+          }
+          if (dragMode.includes('e')) {
+             newW = currentPos.x - activeBox.x;
+          }
+          if (dragMode.includes('n')) {
+             const dy = currentPos.y - activeBox.y;
+             newY = currentPos.y;
+             newH = activeBox.h - dy;
+          }
+          if (dragMode.includes('s')) {
+             newH = currentPos.y - activeBox.y;
+          }
+          
+          return { x: newX, y: newY, w: newW, h: newH };
+        }
       });
     };
 
     const handleMouseUp = () => {
       setIsDrawing(false);
+      
+      // Normalize bounds permanently on mouse up so the box isn't flipped in negative coordinates internally
+      setSelectionBox(prev => {
+        if (!prev) return prev;
+        let { x, y, w, h } = prev;
+        if (w < 0) { x += w; w = Math.abs(w); }
+        if (h < 0) { y += h; h = Math.abs(h); }
+        return { x, y, w, h };
+      });
     };
 
     if (isDrawing) {
@@ -138,16 +261,30 @@ function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDrawing, startPos]);
+  }, [isDrawing, startPos, dragMode, dragOffset]);
 
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const link = document.createElement('url');
+    const link = document.createElement('a');
     link.download = 'highlighted-image.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
+  };
+
+  const getCursorStyle = () => {
+    if (!image) return 'default';
+    const mode = isDrawing ? dragMode : hoverMode;
+    switch (mode) {
+      case 'nw': case 'se': return 'nwse-resize';
+      case 'ne': case 'sw': return 'nesw-resize';
+      case 'n': case 's': return 'ns-resize';
+      case 'w': case 'e': return 'ew-resize';
+      case 'move': return 'move';
+      case 'draw': return 'crosshair';
+      default: return 'crosshair';
+    }
   };
 
   return (
@@ -195,7 +332,7 @@ function App() {
               </div>
 
               <div className="control-group instructions">
-                <p>Click and drag on the image to draw a highlight box.</p>
+                <p>Click and drag on the image to draw a highlight box. You can then drag its center to move it, or drag its edges to resize.</p>
               </div>
 
               <button className="download-btn" onClick={handleDownload} disabled={!selectionBox || selectionBox.w === 0}>
@@ -215,7 +352,9 @@ function App() {
             <canvas
               ref={canvasRef}
               onMouseDown={onMouseDown}
+              onMouseMove={onCanvasMouseMove}
               className="image-canvas"
+              style={{ cursor: getCursorStyle() }}
             />
           )}
         </main>
