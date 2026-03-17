@@ -6,6 +6,7 @@ on:
     paths:
       - 'openrouter-chat/**'
       - 'photo-editor/**'
+      - 'image-highlighter/**'
   workflow_dispatch:
 
 permissions:
@@ -45,12 +46,20 @@ jobs:
           npm ci
           npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/photo-editor/
 
+      - name: Build Image Highlighter
+        working-directory: ./image-highlighter
+        run: |
+          npm ci
+          npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/image-highlighter/
+
       - name: Prepare Deployment
         run: |
           mkdir -p _site/openrouter-chat
           mkdir -p _site/photo-editor
+          mkdir -p _site/image-highlighter
           cp -r openrouter-chat/dist/* _site/openrouter-chat/
           cp -r photo-editor/dist/* _site/photo-editor/
+          cp -r image-highlighter/dist/* _site/image-highlighter/
           
           # Create index.html
           cat > _site/index.html <<EOF
@@ -81,6 +90,12 @@ jobs:
                 <a href="./photo-editor/">
                   <strong>Photo Editor</strong>
                   <div class="desc">Simple photo editing tool</div>
+                </a>
+              </li>
+              <li>
+                <a href="./image-highlighter/">
+                  <strong>Image Highlighter</strong>
+                  <div class="desc">Browser-based image highlighting and blurring</div>
                 </a>
               </li>
             </ul>
