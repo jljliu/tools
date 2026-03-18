@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import * as StackBlur from 'stackblur-canvas';
+import { UploadCloud, Download, Image as ImageIcon } from 'lucide-react';
 import './App.css';
 
 function App() {
   const [image, setImage] = useState(null);
   const [blurLevel, setBlurLevel] = useState(10);
   const [dimLevel, setDimLevel] = useState(0.5);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Selection box state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -16,21 +18,44 @@ function App() {
   const [dragMode, setDragMode] = useState(null); // 'draw', 'move', 'nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'
   const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
   const [hoverMode, setHoverMode] = useState(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   const canvasRef = useRef(null);
   const imageElementRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
+  const handleFile = (file) => {
+    if (file && file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
         imageElementRef.current = img;
         setImage(url);
-        setSelectionBox(null);
+        setSelectionBox({ x: 0, y: 0, w: 0, h: 0 }); // init empty box to prevent UI jump
       };
       img.src = url;
+    }
+  };
+
+  const handleImageUpload = (e) => {
+    handleFile(e.target.files[0]);
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    setIsDraggingFile(true);
+  };
+
+  const onDragLeave = (e) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -98,6 +123,7 @@ function App() {
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     
+    // account for object-fit: contain scaling and offset
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
@@ -113,10 +139,9 @@ function App() {
     if (w < 0) { x += w; w = Math.abs(w); }
     if (h < 0) { y += h; h = Math.abs(h); }
     
-    // Scale margin so grab area is easy regardless of image size
     const canvas = canvasRef.current;
     const scaleX = canvas ? canvas.width / canvas.getBoundingClientRect().width : 1;
-    const margin = 10 * scaleX; 
+    const margin = 12 * scaleX; 
 
     const right = x + w;
     const bottom = y + h;
@@ -168,11 +193,10 @@ function App() {
         if (h < 0) { y += h; h = Math.abs(h); }
         setDragOffset({ dx: pos.x - x, dy: pos.y - y });
       } else {
-        // We are resizing an edge, need to preserve the normalized box as the anchor
         let { x, y, w, h } = selectionBox;
         if (w < 0) { x += w; w = Math.abs(w); }
         if (h < 0) { y += h; h = Math.abs(h); }
-        setSelectionBox({ x, y, w, h }); // lock normalized
+        setSelectionBox({ x, y, w, h });
       }
     } else {
       setDragMode('draw');
@@ -197,17 +221,17 @@ function App() {
 
         if (dragMode === 'draw') {
           return {
-            x: startPos.x,
-            y: startPos.y,
-            w: currentPos.x - startPos.x,
-            h: currentPos.y - startPos.y,
+             x: startPos.x,
+             y: startPos.y,
+             w: currentPos.x - startPos.x,
+             h: currentPos.y - startPos.y,
           };
         } else if (dragMode === 'move') {
           return {
-            x: currentPos.x - dragOffset.dx,
-            y: currentPos.y - dragOffset.dy,
-            w: activeBox.w,
-            h: activeBox.h,
+             x: currentPos.x - dragOffset.dx,
+             y: currentPos.y - dragOffset.dy,
+             w: activeBox.w,
+             h: activeBox.h,
           };
         } else {
           // Resize logic based on dragMode
@@ -216,7 +240,6 @@ function App() {
           let newW = activeBox.w;
           let newH = activeBox.h;
 
-          // For edges, we freeze the opposite side
           if (dragMode.includes('w')) {
              const dx = currentPos.x - activeBox.x;
              newX = currentPos.x;
@@ -242,7 +265,6 @@ function App() {
     const handleMouseUp = () => {
       setIsDrawing(false);
       
-      // Normalize bounds permanently on mouse up so the box isn't flipped in negative coordinates internally
       setSelectionBox(prev => {
         if (!prev) return prev;
         let { x, y, w, h } = prev;
@@ -267,10 +289,15 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const link = document.createElement('a');
-    link.download = 'highlighted-image.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+    setIsProcessing(true);
+    // Add small delay to let UI show processing state
+    setTimeout(() => {
+      const link = document.createElement('a');
+      link.download = 'highlighted-image.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      setIsProcessing(false);
+    }, 50);
   };
 
   const getCursorStyle = () => {
@@ -290,21 +317,39 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
-        <h1>Spotlight</h1>
+        <h1>Spotlight Highlighter</h1>
         <p>Highlight your UI in seconds. Purely in-browser.</p>
       </header>
 
-      <div className="main-content">
-        <aside className="sidebar">
-          <div className="control-group">
-            <label className="upload-btn">
-              Upload Image
-              <input type="file" accept="image/*" onChange={handleImageUpload} hidden />
-            </label>
+      <div className={`main-content ${image ? 'has-image' : ''}`}>
+        {!image ? (
+          <div 
+            className={`empty-upload-zone ${isDraggingFile ? 'drag-active' : ''}`}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <UploadCloud className="upload-icon" />
+            <div className="upload-text">Drop your image here</div>
+            <div className="upload-hint">or click to browse from your computer</div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              style={{ display: 'none' }}
+            />
           </div>
-
-          {image && (
-            <>
+        ) : (
+          <>
+            {/* Sidebar Controls */}
+            <aside className="panel settings-group">
+              <div className="panel-title">
+                <ImageIcon size={20} className="text-accent" />
+                <span>Adjustments</span>
+              </div>
+              
               <div className="control-group">
                 <div className="label-row">
                   <label>Blur Intensity</label>
@@ -331,33 +376,44 @@ function App() {
                 />
               </div>
 
-              <div className="control-group instructions">
+              <div className="instructions control-group">
                 <p>Click and drag on the image to draw a highlight box. You can then drag its center to move it, or drag its edges to resize.</p>
               </div>
 
-              <button className="download-btn" onClick={handleDownload} disabled={!selectionBox || selectionBox.w === 0}>
-                Download Image
-              </button>
-            </>
-          )}
-        </aside>
+              <div style={{ marginTop: 'auto', paddingTop: '24px' }}>
+                <button
+                  onClick={handleDownload}
+                  disabled={!selectionBox || selectionBox.w === 0 || isProcessing}
+                  className="btn btn-primary"
+                >
+                  <Download size={18} />
+                  {isProcessing ? 'Processing...' : 'Download Image'}
+                </button>
+                
+                <button
+                  onClick={() => setImage(null)}
+                  className="btn btn-secondary"
+                  style={{ marginTop: '12px' }}
+                >
+                  Change Image
+                </button>
+              </div>
+            </aside>
 
-        <main className="canvas-wrapper">
-          {!image ? (
-            <div className="empty-state">
-              <div className="empty-icon">🖼️</div>
-              <p>Upload an image to get started</p>
-            </div>
-          ) : (
-            <canvas
-              ref={canvasRef}
-              onMouseDown={onMouseDown}
-              onMouseMove={onCanvasMouseMove}
-              className="image-canvas"
-              style={{ cursor: getCursorStyle() }}
-            />
-          )}
-        </main>
+            {/* Canvas Area */}
+            <main className="editor-area">
+              <div className="canvas-wrapper">
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={onMouseDown}
+                  onMouseMove={onCanvasMouseMove}
+                  className="image-canvas"
+                  style={{ cursor: getCursorStyle() }}
+                />
+              </div>
+            </main>
+          </>
+        )}
       </div>
     </div>
   );
