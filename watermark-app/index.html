@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Watermark Studio</title>
+    <!-- We can use Google Fonts for modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Watermark Studio</h1>
+        <p>Add completely customizable, non-destructive watermarks to your images.</p>
+      </header>
+      
+      <main class="container">
+        <aside class="controls-panel">
+          <div class="control-group">
+            <label for="imageUpload">Upload Image</label>
+            <div class="file-upload-wrapper">
+              <input type="file" id="imageUpload" accept="image/*" />
+              <button class="upload-btn">Choose Image</button>
+              <span id="fileName" class="file-name">No file chosen</span>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="watermarkText">Watermark Text</label>
+            <input type="text" id="watermarkText" placeholder="Confidential" value="Watermark" />
+          </div>
+
+          <div class="slider-group">
+            <label for="fontSize">Font Size (<span id="fontSizeDisplay">48</span>)</label>
+            <input type="range" id="fontSize" min="10" max="200" value="48" />
+          </div>
+
+          <div class="slider-group">
+            <label for="opacity">Opacity (<span id="opacityDisplay">30</span>%)</label>
+            <input type="range" id="opacity" min="0" max="100" value="30" />
+          </div>
+          
+          <div class="slider-group">
+            <label for="rotation">Rotation (<span id="rotationDisplay">-30</span>°)</label>
+            <input type="range" id="rotation" min="-180" max="180" value="-30" />
+          </div>
+
+          <div class="color-picker-group">
+            <label for="textColor">Text Color</label>
+            <input type="color" id="textColor" value="#ffffff" />
+          </div>
+
+          <div class="control-group action-group">
+            <button id="downloadBtn" class="primary-btn" disabled>Download Image</button>
+          </div>
+        </aside>
+
+        <section class="preview-panel">
+          <div class="canvas-container" id="canvasContainer">
+             <div id="placeholder" class="placeholder-text">Please upload an image to begin.</div>
+             <canvas id="canvas" style="display: none;"></canvas>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        Made with ❤️ by Antigravity
+      </footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

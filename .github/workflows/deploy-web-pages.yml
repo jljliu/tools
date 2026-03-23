@@ -8,6 +8,7 @@ on:
       - 'photo-editor/**'
       - 'image-highlighter/**'
       - 'image-cropper/**'
+      - 'watermark-app/**'
   workflow_dispatch:
 
 permissions:
@@ -59,16 +60,24 @@ jobs:
           npm ci
           npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/image-cropper/
 
+      - name: Build Watermark App
+        working-directory: ./watermark-app
+        run: |
+          npm ci
+          npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/watermark-app/
+
       - name: Prepare Deployment
         run: |
           mkdir -p _site/openrouter-chat
           mkdir -p _site/photo-editor
           mkdir -p _site/image-highlighter
           mkdir -p _site/image-cropper
+          mkdir -p _site/watermark-app
           cp -r openrouter-chat/dist/* _site/openrouter-chat/
           cp -r photo-editor/dist/* _site/photo-editor/
           cp -r image-highlighter/dist/* _site/image-highlighter/
           cp -r image-cropper/dist/* _site/image-cropper/
+          cp -r watermark-app/dist/* _site/watermark-app/
           
           # Create index.html
           cat > _site/index.html <<EOF
@@ -111,6 +120,12 @@ jobs:
                 <a href="./image-cropper/">
                   <strong>Image Cropper</strong>
                   <div class="desc">Precision image cropper with custom dimensions</div>
+                </a>
+              </li>
+              <li>
+                <a href="./watermark-app/">
+                  <strong>Watermark Studio</strong>
+                  <div class="desc">Add customizable watermarks into your images</div>
                 </a>
               </li>
             </ul>
