@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text On Image App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;700&family=Dancing+Script:wght@400;700&family=Oswald:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <aside class="sidebar">
+        <div class="brand">
+          <i data-lucide="image"></i>
+          <h1>ImgTxt</h1>
+        </div>
+        
+        <div class="control-group">
+          <h3>Image</h3>
+          <input type="file" id="image-upload" accept="image/*" class="file-input" />
+          <label for="image-upload" class="btn btn-secondary flex-center">
+            <i data-lucide="upload"></i> Upload Image
+          </label>
+        </div>
+
+        <div class="control-group" id="text-controls-section" style="opacity: 0.5; pointer-events: none;">
+          <h3>Text Elements</h3>
+          <button id="add-text-btn" class="btn btn-primary flex-center">
+            <i data-lucide="plus"></i> Add Text
+          </button>
+          
+          <div id="active-text-settings" class="settings-panel hidden">
+            <h4>Selected Text Settings</h4>
+            
+            <div class="input-group">
+              <label>Content</label>
+              <textarea id="text-content-input" rows="2" placeholder="Enter text here..."></textarea>
+            </div>
+
+            <div class="input-group">
+              <label>Font Family</label>
+              <select id="font-family-select">
+                <option value="'Inter', sans-serif">Inter</option>
+                <option value="'Outfit', sans-serif">Outfit</option>
+                <option value="'Playfair Display', serif">Playfair Display</option>
+                <option value="'Cinzel', serif">Cinzel</option>
+                <option value="'Dancing Script', cursive">Dancing Script</option>
+                <option value="'Oswald', sans-serif">Oswald</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label>Color</label>
+              <div class="color-picker-wrap">
+                <input type="color" id="text-color-input" value="#ffffff" />
+                <span class="color-value" id="text-color-value">#ffffff</span>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>Size (<span id="text-size-value">48</span>px)</label>
+              <input type="range" id="text-size-input" min="12" max="200" value="48" />
+            </div>
+
+            <button id="delete-text-btn" class="btn btn-danger flex-center">
+              <i data-lucide="trash-2"></i> Remove Text
+            </button>
+          </div>
+        </div>
+
+        <div class="spacer"></div>
+        
+        <button id="download-btn" class="btn btn-success flex-center" disabled>
+          <i data-lucide="download"></i> Download Image
+        </button>
+      </aside>
+
+      <main class="canvas-area">
+        <div class="canvas-wrapper" id="canvas-wrapper">
+          <div class="empty-state" id="empty-state">
+            <i data-lucide="image-plus"></i>
+            <p>Upload an image to get started</p>
+          </div>
+          <img id="main-image" class="hidden" alt="Uploaded target" draggable="false" />
+          <div id="text-layer" class="text-layer hidden"></div>
+        </div>
+      </main>
+    </div>
+    
+    <canvas id="export-canvas" class="hidden" style="display: none;"></canvas>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
