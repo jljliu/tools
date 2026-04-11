@@ -66,7 +66,16 @@
               <input type="range" id="text-size-input" min="12" max="200" value="48" />
             </div>
 
-            <button id="delete-text-btn" class="btn btn-danger flex-center">
+            <div class="input-group">
+              <label>Alignment</label>
+              <div class="align-buttons">
+                <button id="align-left-btn" class="btn-align"><i data-lucide="align-left"></i></button>
+                <button id="align-center-btn" class="btn-align active"><i data-lucide="align-center"></i></button>
+                <button id="align-right-btn" class="btn-align"><i data-lucide="align-right"></i></button>
+              </div>
+            </div>
+
+            <button id="delete-text-btn" class="btn-danger flex-center btn">
               <i data-lucide="trash-2"></i> Remove Text
             </button>
           </div>

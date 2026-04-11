@@ -1,4 +1,4 @@
-import { createIcons, Image, Upload, Plus, Trash2, Download, ImagePlus, UploadCloud } from 'lucide';
+import { createIcons, Image, Upload, Plus, Trash2, Download, ImagePlus, UploadCloud, AlignLeft, AlignCenter, AlignRight } from 'lucide';
 
 // Initialize Lucide icons
 createIcons({
@@ -9,7 +9,10 @@ createIcons({
     Trash2,
     Download,
     ImagePlus,
-    UploadCloud
+    UploadCloud,
+    AlignLeft,
+    AlignCenter,
+    AlignRight
   }
 });
 
@@ -35,6 +38,9 @@ const textColorInput = document.getElementById('text-color-input');
 const textColorValue = document.getElementById('text-color-value');
 const textSizeInput = document.getElementById('text-size-input');
 const textSizeValue = document.getElementById('text-size-value');
+const alignLeftBtn = document.getElementById('align-left-btn');
+const alignCenterBtn = document.getElementById('align-center-btn');
+const alignRightBtn = document.getElementById('align-right-btn');
 const deleteTextBtn = document.getElementById('delete-text-btn');
 const downloadBtn = document.getElementById('download-btn');
 
@@ -62,6 +68,10 @@ textSizeInput.addEventListener('input', (e) => {
   textSizeValue.textContent = e.target.value;
   updateActiveText('fontSize', parseInt(e.target.value, 10));
 });
+
+alignLeftBtn.addEventListener('click', () => updateActiveText('textAlign', 'left'));
+alignCenterBtn.addEventListener('click', () => updateActiveText('textAlign', 'center'));
+alignRightBtn.addEventListener('click', () => updateActiveText('textAlign', 'right'));
 
 // Deselect text when clicking outside
 canvasWrapper.addEventListener('click', (e) => {
@@ -139,7 +149,7 @@ function addTextElement() {
     fontFamily: "'Inter', sans-serif",
     color: '#ffffff',
     fontSize: 48,
-    fontSize: 48,
+    textAlign: 'center',
     // Store position as percentages (0 to 100) for responsive accuracy
     x: 50,
     y: 50,
@@ -191,6 +201,11 @@ function updateSettingsPanel() {
   textColorValue.textContent = activeText.color;
   textSizeInput.value = activeText.fontSize;
   textSizeValue.textContent = activeText.fontSize;
+
+  const align = activeText.textAlign || 'center';
+  alignLeftBtn.classList.toggle('active', align === 'left');
+  alignCenterBtn.classList.toggle('active', align === 'center');
+  alignRightBtn.classList.toggle('active', align === 'right');
 }
 
 /* Rendering and Dragging */
@@ -276,6 +291,11 @@ function updateDOMElementStyles(el, textObj) {
     el.style.height = `${textObj.height}%`;
   } else {
     el.style.height = 'auto';
+  }
+  
+  const contentNode = el.querySelector('.text-content');
+  if (contentNode) {
+    contentNode.style.textAlign = textObj.textAlign || 'center';
   }
   
   // Calculate rendered scale
@@ -488,6 +508,7 @@ function handleDownload() {
       let lines = [];
       const paragraphs = textObj.text.split('\n');
       const maxWidth = textObj.width !== null ? (textObj.width / 100) * exportCanvas.width : Number.MAX_VALUE;
+      let actualMaxWidth = 0;
 
       paragraphs.forEach(paragraph => {
         let words = paragraph.split(' ');
@@ -507,13 +528,31 @@ function handleDownload() {
         lines.push(currentLine);
       });
 
+      // Find the rendering width for alignment calculations
+      lines.forEach(line => {
+        let w = ctx.measureText(line).width;
+        if (w > actualMaxWidth) actualMaxWidth = w;
+      });
+
+      const boxPxWidth = textObj.width !== null ? maxWidth : actualMaxWidth;
       const lineHeight = textObj.fontSize * 1.2;
       
       // Adjust starting Y to center the whole block of lines
       let startY = cy - ((lines.length - 1) * lineHeight) / 2;
       
+      const align = textObj.textAlign || 'center';
+
       lines.forEach((line, index) => {
-        ctx.fillText(line, cx, startY + (index * lineHeight));
+        let drawX = cx;
+        const lineWidth = ctx.measureText(line).width;
+        
+        if (align === 'left') {
+          drawX = cx - (boxPxWidth / 2) + (lineWidth / 2);
+        } else if (align === 'right') {
+          drawX = cx + (boxPxWidth / 2) - (lineWidth / 2);
+        }
+        
+        ctx.fillText(line, drawX, startY + (index * lineHeight));
       });
     });
     
