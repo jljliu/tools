@@ -69,6 +69,28 @@ canvasWrapper.addEventListener('click', (e) => {
   }
 });
 
+// Drag and drop image
+document.body.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  canvasWrapper.classList.add('drag-active');
+});
+
+document.body.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  if (e.target === document.body || e.target === canvasWrapper) {
+    canvasWrapper.classList.remove('drag-active');
+  }
+});
+
+document.body.addEventListener('drop', (e) => {
+  e.preventDefault();
+  canvasWrapper.classList.remove('drag-active');
+  const file = e.dataTransfer.files ? e.dataTransfer.files[0] : null;
+  if (file && file.type.startsWith('image/')) {
+    handleImageUpload({ target: { files: [file] } });
+  }
+});
+
 /* Core Functions */
 
 function handleImageUpload(e) {
@@ -114,9 +136,12 @@ function addTextElement() {
     fontFamily: "'Inter', sans-serif",
     color: '#ffffff',
     fontSize: 48,
+    fontSize: 48,
     // Store position as percentages (0 to 100) for responsive accuracy
     x: 50,
     y: 50,
+    width: null,
+    height: null
   };
   
   appState.texts.push(newText);
@@ -177,12 +202,22 @@ function renderTexts() {
     el.id = `text-${textObj.id}`;
     
     // Apply styling
-    el.innerText = textObj.text;
-    el.style.left = `${textObj.x}%`;
-    el.style.top = `${textObj.y}%`;
-    el.style.fontFamily = textObj.fontFamily;
-    el.style.color = textObj.color;
-    
+    const content = document.createElement('div');
+    content.className = 'text-content';
+    content.innerText = textObj.text;
+    el.appendChild(content);
+
+    if (textObj.id === appState.activeTextId) {
+      const handles = ['left', 'right', 'top', 'bottom'];
+      handles.forEach(pos => {
+        const handle = document.createElement('div');
+        handle.className = `resize-handle handle-${pos}`;
+        handle.addEventListener('mousedown', (e) => startResize(e, textObj, pos));
+        handle.addEventListener('touchstart', (e) => startResize(e, textObj, pos), { passive: false });
+        el.appendChild(handle);
+      });
+    }
+
     // The font size in the UI should scale relative to the image currently displayed
     // It shouldn't be microscopic if the image is huge.
     // We treat 'fontSize' as a base size based on a 1000px height image for consistency.
@@ -190,8 +225,8 @@ function renderTexts() {
     updateDOMElementStyles(el, textObj);
     
     // Interactions
-    el.addEventListener('mousedown', (e) => startDrag(e, textObj));
-    el.addEventListener('touchstart', (e) => startDrag(e, textObj), { passive: false });
+    content.addEventListener('mousedown', (e) => startDrag(e, textObj));
+    content.addEventListener('touchstart', (e) => startDrag(e, textObj), { passive: false });
     
     // Select on click
     el.addEventListener('click', (e) => {
@@ -206,7 +241,8 @@ function renderTexts() {
 function updateDOMElement(textObj) {
   const el = document.getElementById(`text-${textObj.id}`);
   if (el) {
-    el.innerText = textObj.text;
+    const content = el.querySelector('.text-content');
+    if (content) content.innerText = textObj.text;
     updateDOMElementStyles(el, textObj);
   }
 }
@@ -216,6 +252,28 @@ function updateDOMElementStyles(el, textObj) {
   el.style.top = `${textObj.y}%`;
   el.style.fontFamily = textObj.fontFamily;
   el.style.color = textObj.color;
+  
+  if (textObj.width !== null) {
+    el.style.width = `${textObj.width}%`;
+    const content = el.querySelector('.text-content');
+    if (content) {
+      content.style.whiteSpace = 'normal';
+      content.style.wordBreak = 'break-word';
+    }
+  } else {
+    el.style.width = 'auto';
+    const content = el.querySelector('.text-content');
+    if (content) {
+      content.style.whiteSpace = 'pre-wrap';
+      content.style.wordBreak = 'normal';
+    }
+  }
+
+  if (textObj.height !== null) {
+    el.style.height = `${textObj.height}%`;
+  } else {
+    el.style.height = 'auto';
+  }
   
   // Calculate rendered scale
   const displayedHeight = mainImage.clientHeight;
@@ -292,6 +350,105 @@ function endDrag() {
   document.removeEventListener('touchend', endDrag);
 }
 
+// Resizing Logic
+let isResizing = false;
+let currentResizeObj = null;
+let currentResizeSide = null;
+let resizeStartX = 0;
+let resizeStartY = 0;
+let initialWidth = 0;
+let initialHeight = 0;
+let initialX = 0;
+let initialY = 0;
+
+function startResize(e, textObj, side) {
+  e.preventDefault();
+  e.stopPropagation();
+  isResizing = true;
+  currentResizeObj = textObj;
+  currentResizeSide = side;
+  
+  if (e.type.includes('mouse')) {
+    resizeStartX = e.clientX;
+    resizeStartY = e.clientY;
+  } else {
+    resizeStartX = e.touches[0].clientX;
+    resizeStartY = e.touches[0].clientY;
+  }
+
+  const el = document.getElementById(`text-${textObj.id}`);
+  const rect = el.getBoundingClientRect();
+  const parentRect = canvasWrapper.getBoundingClientRect();
+
+  if (currentResizeObj.width === null) {
+    currentResizeObj.width = (rect.width / parentRect.width) * 100;
+  }
+  if (currentResizeObj.height === null) {
+    currentResizeObj.height = (rect.height / parentRect.height) * 100;
+  }
+
+  initialWidth = currentResizeObj.width;
+  initialHeight = currentResizeObj.height;
+  initialX = currentResizeObj.x;
+  initialY = currentResizeObj.y;
+
+  document.addEventListener('mousemove', onResize);
+  document.addEventListener('mouseup', endResize);
+  document.addEventListener('touchmove', onResize, { passive: false });
+  document.addEventListener('touchend', endResize);
+}
+
+function onResize(e) {
+  if (!isResizing || !currentResizeObj) return;
+  e.preventDefault();
+  
+  let clientX, clientY;
+  if (e.type.includes('mouse')) {
+    clientX = e.clientX;
+    clientY = e.clientY;
+  } else {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  }
+
+  const dx = clientX - resizeStartX;
+  const dy = clientY - resizeStartY;
+  
+  const parentRect = canvasWrapper.getBoundingClientRect();
+  const dxPct = (dx / parentRect.width) * 100;
+  const dyPct = (dy / parentRect.height) * 100;
+
+  if (currentResizeSide === 'right') {
+    currentResizeObj.width = Math.max(5, initialWidth + dxPct);
+    const actualDxPct = currentResizeObj.width - initialWidth;
+    currentResizeObj.x = initialX + actualDxPct / 2;
+  } else if (currentResizeSide === 'left') {
+    currentResizeObj.width = Math.max(5, initialWidth - dxPct);
+    const actualDxPct = initialWidth - currentResizeObj.width;
+    currentResizeObj.x = initialX - actualDxPct / 2;
+  } else if (currentResizeSide === 'bottom') {
+    currentResizeObj.height = Math.max(5, initialHeight + dyPct);
+    const actualDyPct = currentResizeObj.height - initialHeight;
+    currentResizeObj.y = initialY + actualDyPct / 2;
+  } else if (currentResizeSide === 'top') {
+    currentResizeObj.height = Math.max(5, initialHeight - dyPct);
+    const actualDyPct = initialHeight - currentResizeObj.height;
+    currentResizeObj.y = initialY - actualDyPct / 2;
+  }
+
+  updateDOMElement(currentResizeObj);
+}
+
+function endResize() {
+  isResizing = false;
+  currentResizeObj = null;
+  currentResizeSide = null;
+  document.removeEventListener('mousemove', onResize);
+  document.removeEventListener('mouseup', endResize);
+  document.removeEventListener('touchmove', onResize);
+  document.removeEventListener('touchend', endResize);
+}
+
 /* Download / Export */
 
 function handleDownload() {
@@ -324,8 +481,29 @@ function handleDownload() {
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = Math.max(2, textObj.fontSize * 0.05);
 
-      // Handle multi-line text (DOM supports pre-wrap)
-      const lines = textObj.text.split('\n');
+      // Handle multi-line text and word wrapping if width is defined
+      let lines = [];
+      const paragraphs = textObj.text.split('\n');
+      const maxWidth = textObj.width !== null ? (textObj.width / 100) * exportCanvas.width : Number.MAX_VALUE;
+
+      paragraphs.forEach(paragraph => {
+        let words = paragraph.split(' ');
+        let currentLine = words[0] || '';
+        
+        for (let i = 1; i < words.length; i++) {
+          let word = words[i];
+          let testLine = currentLine + " " + word;
+          let testWidth = ctx.measureText(testLine).width;
+          if (testWidth < maxWidth) {
+            currentLine = testLine;
+          } else {
+            lines.push(currentLine);
+            currentLine = word;
+          }
+        }
+        lines.push(currentLine);
+      });
+
       const lineHeight = textObj.fontSize * 1.2;
       
       // Adjust starting Y to center the whole block of lines

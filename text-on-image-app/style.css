@@ -318,6 +318,12 @@ input[type="range"]::-webkit-slider-thumb:hover {
   position: relative;
   overflow: hidden;
   background: repeating-conic-gradient(rgba(255,255,255,0.02) 0% 25%, transparent 0% 50%) 50% / 20px 20px;
+  transition: background-color 0.3s ease, border 0.3s ease;
+}
+
+.canvas-area.drag-active {
+  background-color: rgba(99, 102, 241, 0.1);
+  border: 2px dashed var(--accent-color);
 }
 
 .canvas-wrapper {
@@ -409,4 +415,58 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .text-element:active {
   cursor: grabbing;
+}
+
+/* Resize Handles */
+.resize-handle {
+  position: absolute;
+  background: var(--accent-color);
+  border: 1px solid #fff;
+  z-index: 10;
+  box-shadow: 0 0 4px rgba(0,0,0,0.5);
+  pointer-events: auto;
+}
+
+.resize-handle.hidden {
+  display: none;
+}
+
+.handle-left {
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 20px;
+  cursor: ew-resize;
+  border-radius: 4px;
+}
+
+.handle-right {
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 20px;
+  cursor: ew-resize;
+  border-radius: 4px;
+}
+
+.handle-top {
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 8px;
+  cursor: ns-resize;
+  border-radius: 4px;
+}
+
+.handle-bottom {
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 8px;
+  cursor: ns-resize;
+  border-radius: 4px;
 }
