@@ -37,9 +37,11 @@ export function initCropper() {
          </button>
       </div>
       
-      <div class="cropper-workspace">
-        <div id="cropper-placeholder" class="placeholder-text">
-            <p>Upload an image to start editing</p>
+      <div id="cropper-workspace" class="cropper-workspace">
+        <div id="cropper-placeholder" class="placeholder-text" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; cursor: pointer;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-accent); margin-bottom: 16px;"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
+            <p style="font-weight: 500; color: var(--color-text-primary); font-size: 1.1rem;">Drop your image here</p>
+            <p style="font-size: 0.875rem; margin-top: 8px; color: var(--color-text-muted);">or click to browse from your computer</p>
         </div>
         <div>
            <img id="cropper-img" style="max-width: 100%; display: block;">
@@ -51,16 +53,15 @@ export function initCropper() {
     const inputImage = document.getElementById('crop-input');
     const image = document.getElementById('cropper-img');
     const placeholder = document.getElementById('cropper-placeholder');
+    const workspace = document.getElementById('cropper-workspace');
     const btnDownload = document.getElementById('btn-crop-download');
     const btnRotate = document.getElementById('crop-rotate');
     const selectRatio = document.getElementById('crop-ratio');
 
     let cropper;
 
-    // File Upload Handling
-    inputImage.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+    function handleFile(file) {
+        if (!file || !file.type.startsWith('image/')) return;
 
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -83,8 +84,36 @@ export function initCropper() {
             });
         };
         reader.readAsDataURL(file);
+    }
+
+    // File Upload Handling
+    inputImage.addEventListener('change', (e) => {
+        handleFile(e.target.files[0]);
         // Reset value so same file can be selected again
         inputImage.value = '';
+    });
+
+    placeholder.addEventListener('click', () => {
+        inputImage.click();
+    });
+
+    // Drag and drop logic
+    workspace.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        workspace.classList.add('drag-active');
+    });
+
+    workspace.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        workspace.classList.remove('drag-active');
+    });
+
+    workspace.addEventListener('drop', (e) => {
+        e.preventDefault();
+        workspace.classList.remove('drag-active');
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFile(e.dataTransfer.files[0]);
+        }
     });
 
     // Controls

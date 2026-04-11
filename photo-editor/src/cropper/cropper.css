@@ -26,6 +26,12 @@
     overflow: hidden;
     position: relative;
     border: 1px dashed var(--color-border);
+    transition: all 0.2s ease;
+}
+
+.cropper-workspace.drag-active {
+    border-color: var(--color-accent);
+    background-color: rgba(56, 189, 248, 0.05);
 }
 
 .file-upload-wrapper {
