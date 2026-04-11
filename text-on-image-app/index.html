@@ -81,9 +81,10 @@
 
       <main class="canvas-area">
         <div class="canvas-wrapper" id="canvas-wrapper">
-          <div class="empty-state" id="empty-state">
-            <i data-lucide="image-plus"></i>
-            <p>Upload an image to get started</p>
+          <div class="empty-state upload-zone" id="empty-state">
+            <i data-lucide="upload-cloud" class="upload-icon"></i>
+            <div class="upload-text">Drop your image here</div>
+            <div class="upload-hint">or click to browse from your computer</div>
           </div>
           <img id="main-image" class="hidden" alt="Uploaded target" draggable="false" />
           <div id="text-layer" class="text-layer hidden"></div>

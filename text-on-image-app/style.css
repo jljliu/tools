@@ -348,22 +348,51 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
   color: var(--text-secondary);
-  pointer-events: none;
-  text-align: center;
+  pointer-events: auto;
   transition: opacity 0.3s ease;
-}
-
-.empty-state i {
-  width: 48px;
-  height: 48px;
-  opacity: 0.5;
+  z-index: 10;
 }
 
 .empty-state.hidden {
   opacity: 0;
-  display: none;
+  pointer-events: none;
+}
+
+.upload-zone {
+  border: 2px dashed rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background-color: rgba(255, 255, 255, 0.03);
+  gap: 16px;
+  width: 80vw;
+  max-width: 500px;
+  min-height: 300px;
+}
+
+.upload-zone.drag-active-zone, .upload-zone:hover {
+  border-color: var(--accent-color);
+  background-color: rgba(99, 102, 241, 0.05); /* slight tint */
+}
+
+.upload-icon {
+  color: var(--accent-color);
+  width: 48px;
+  height: 48px;
+}
+
+.upload-text {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.upload-hint {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
 }
 
 #main-image {

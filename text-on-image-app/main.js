@@ -1,4 +1,4 @@
-import { createIcons, Image, Upload, Plus, Trash2, Download, ImagePlus } from 'lucide';
+import { createIcons, Image, Upload, Plus, Trash2, Download, ImagePlus, UploadCloud } from 'lucide';
 
 // Initialize Lucide icons
 createIcons({
@@ -8,7 +8,8 @@ createIcons({
     Plus,
     Trash2,
     Download,
-    ImagePlus
+    ImagePlus,
+    UploadCloud
   }
 });
 
@@ -70,21 +71,23 @@ canvasWrapper.addEventListener('click', (e) => {
 });
 
 // Drag and drop image
-document.body.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  canvasWrapper.classList.add('drag-active');
+emptyState.addEventListener('click', () => {
+  imageUpload.click();
 });
 
-document.body.addEventListener('dragleave', (e) => {
+emptyState.addEventListener('dragover', (e) => {
   e.preventDefault();
-  if (e.target === document.body || e.target === canvasWrapper) {
-    canvasWrapper.classList.remove('drag-active');
-  }
+  emptyState.classList.add('drag-active-zone');
 });
 
-document.body.addEventListener('drop', (e) => {
+emptyState.addEventListener('dragleave', (e) => {
   e.preventDefault();
-  canvasWrapper.classList.remove('drag-active');
+  emptyState.classList.remove('drag-active-zone');
+});
+
+emptyState.addEventListener('drop', (e) => {
+  e.preventDefault();
+  emptyState.classList.remove('drag-active-zone');
   const file = e.dataTransfer.files ? e.dataTransfer.files[0] : null;
   if (file && file.type.startsWith('image/')) {
     handleImageUpload({ target: { files: [file] } });
