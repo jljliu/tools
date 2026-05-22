@@ -2,21 +2,21 @@ import React, { useCallback, useState } from 'react';
 import { UploadCloud } from 'lucide-react';
 
 interface ImageUploaderProps {
-  onImageSelected: (src: string) => void;
+  onImageSelected: (src: string, name: string) => void;
 }
 
 export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected }) => {
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleFile = (file: File) => {
+  const handleFile = useCallback((file: File) => {
     if (file && file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.addEventListener('load', () => {
-        onImageSelected(reader.result?.toString() || '');
+        onImageSelected(reader.result?.toString() || '', file.name);
       });
       reader.readAsDataURL(file);
     }
-  };
+  }, [onImageSelected]);
 
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -34,7 +34,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected })
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFile(e.dataTransfer.files[0]);
     }
-  }, []);
+  }, [handleFile]);
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {

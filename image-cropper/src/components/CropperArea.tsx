@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import ReactCrop, { type Crop, type PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
+import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
+import { initCrop } from '../utils/imageOperations';
 import 'react-image-crop/dist/ReactCrop.css';
 
 interface CropperAreaProps {
@@ -9,23 +10,6 @@ interface CropperAreaProps {
   crop: Crop;
   setCrop: (crop: Crop) => void;
   setCompletedCrop: (crop: PixelCrop) => void;
-}
-
-// Function to generate an initial crop that centers the area based on aspect ratio
-export function initCrop(mediaWidth: number, mediaHeight: number, aspect: number) {
-  return centerCrop(
-    makeAspectCrop(
-      {
-        unit: '%',
-        width: 90,
-      },
-      aspect,
-      mediaWidth,
-      mediaHeight
-    ),
-    mediaWidth,
-    mediaHeight
-  );
 }
 
 export const CropperArea: React.FC<CropperAreaProps> = ({

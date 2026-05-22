@@ -1,4 +1,23 @@
-import { type PixelCrop } from 'react-image-crop';
+import { type PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
+
+/**
+ * Function to generate an initial crop that centers the area based on aspect ratio
+ */
+export function initCrop(mediaWidth: number, mediaHeight: number, aspect: number) {
+  return centerCrop(
+    makeAspectCrop(
+      {
+        unit: '%',
+        width: 90,
+      },
+      aspect,
+      mediaWidth,
+      mediaHeight
+    ),
+    mediaWidth,
+    mediaHeight
+  );
+}
 
 /**
  * Perform crop and resize using a hidden HTML Canvas
@@ -35,6 +54,7 @@ export async function getCroppedResizedImage(
   const sourceHeight = crop.height * scaleY;
 
   // Ensure high quality image scaling
+  ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
   // Draw the image onto the target canvas
