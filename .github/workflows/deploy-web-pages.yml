@@ -10,6 +10,7 @@ on:
       - 'image-cropper/**'
       - 'watermark-app/**'
       - 'text-on-image-app/**'
+      - 'math-generator/**'
   workflow_dispatch:
 
 permissions:
@@ -73,6 +74,12 @@ jobs:
           npm ci
           npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/text-on-image-app/
 
+      - name: Build Math Generator
+        working-directory: ./math-generator
+        run: |
+          npm ci
+          npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/math-generator/
+
       - name: Prepare Deployment
         run: |
           mkdir -p _site/openrouter-chat
@@ -81,12 +88,14 @@ jobs:
           mkdir -p _site/image-cropper
           mkdir -p _site/watermark-app
           mkdir -p _site/text-on-image-app
+          mkdir -p _site/math-generator
           cp -r openrouter-chat/dist/* _site/openrouter-chat/
           cp -r photo-editor/dist/* _site/photo-editor/
           cp -r image-highlighter/dist/* _site/image-highlighter/
           cp -r image-cropper/dist/* _site/image-cropper/
           cp -r watermark-app/dist/* _site/watermark-app/
           cp -r text-on-image-app/dist/* _site/text-on-image-app/
+          cp -r math-generator/dist/* _site/math-generator/
           
           # Create index.html
           cat > _site/index.html <<EOF
@@ -141,6 +150,12 @@ jobs:
                 <a href="./text-on-image-app/">
                   <strong>Text On Image App</strong>
                   <div class="desc">Add multiple text elements to your images</div>
+                </a>
+              </li>
+              <li>
+                <a href="./math-generator/">
+                  <strong>Math PDF Generator</strong>
+                  <div class="desc">Printable math worksheets generator with 25 customizable problem templates</div>
                 </a>
               </li>
             </ul>
