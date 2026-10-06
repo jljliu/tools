@@ -11,6 +11,7 @@ on:
       - 'watermark-app/**'
       - 'text-on-image-app/**'
       - 'math-generator/**'
+      - 'excel-viewer/**'
   workflow_dispatch:
 
 permissions:
@@ -80,6 +81,12 @@ jobs:
           npm ci
           npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/math-generator/
 
+      - name: Build Excel Viewer
+        working-directory: ./excel-viewer
+        run: |
+          npm ci
+          npm run build -- --base=/${{ steps.repo-name.outputs.REPO_NAME }}/excel-viewer/
+
       - name: Prepare Deployment
         run: |
           mkdir -p _site/openrouter-chat
@@ -89,6 +96,7 @@ jobs:
           mkdir -p _site/watermark-app
           mkdir -p _site/text-on-image-app
           mkdir -p _site/math-generator
+          mkdir -p _site/excel-viewer
           cp -r openrouter-chat/dist/* _site/openrouter-chat/
           cp -r photo-editor/dist/* _site/photo-editor/
           cp -r image-highlighter/dist/* _site/image-highlighter/
@@ -96,6 +104,7 @@ jobs:
           cp -r watermark-app/dist/* _site/watermark-app/
           cp -r text-on-image-app/dist/* _site/text-on-image-app/
           cp -r math-generator/dist/* _site/math-generator/
+          cp -r excel-viewer/dist/* _site/excel-viewer/
           
           # Create index.html
           cat > _site/index.html <<EOF
@@ -156,6 +165,12 @@ jobs:
                 <a href="./math-generator/">
                   <strong>Math PDF Generator</strong>
                   <div class="desc">Printable math worksheets generator with 25 customizable problem templates</div>
+                </a>
+              </li>
+              <li>
+                <a href="./excel-viewer/">
+                  <strong>Excel & CSV Viewer</strong>
+                  <div class="desc">Client-side spreadsheet viewer with sorting, filtering, and column visibility controls</div>
                 </a>
               </li>
             </ul>

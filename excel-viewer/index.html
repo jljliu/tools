@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Excel & CSV Viewer - Fast, In-Browser Spreadsheet Reader</title>
+  <meta name="description" content="Free, 100% client-side Excel (.xlsx, .xls) and CSV spreadsheet viewer. Sort, filter, search, and manage column visibility with total privacy." />
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Bar -->
+    <header class="navbar" id="app-navbar">
+      <div class="nav-left">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="8" y1="13" x2="16" y2="13"></line>
+              <line x1="8" y1="17" x2="16" y2="17"></line>
+              <line x1="10" y1="9" x2="8" y2="9"></line>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h1 class="brand-title">DataSheet</h1>
+            <span class="brand-badge">Read-Only</span>
+          </div>
+        </div>
+
+        <!-- File & Sheet Meta (Visible after file loaded) -->
+        <div class="file-meta hidden" id="file-meta">
+          <div class="meta-divider"></div>
+          <div class="file-chip" id="file-chip" title="Active file">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+              <polyline points="13 2 13 9 20 9"></polyline>
+            </svg>
+            <span id="active-filename" class="meta-filename">sample.xlsx</span>
+          </div>
+
+          <!-- Multi-Sheet Selector -->
+          <div class="sheet-selector-wrap hidden" id="sheet-selector-wrap">
+            <label for="sheet-select" class="sheet-label">Sheet:</label>
+            <select id="sheet-select" class="sheet-select" aria-label="Select sheet"></select>
+          </div>
+
+          <div class="meta-stats" id="meta-stats">
+            <span class="stat-badge" id="row-count-badge">0 rows</span>
+            <span class="stat-badge" id="col-count-badge">0 cols</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-right">
+        <!-- Hidden file input -->
+        <input type="file" id="file-input" accept=".xlsx,.xls,.csv" class="visually-hidden" />
+
+        <button type="button" class="btn btn-secondary" id="sample-btn" title="Load sample dataset to explore features">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span>Demo Data</span>
+        </button>
+
+        <label for="file-input" class="btn btn-primary" id="upload-btn" tabindex="0">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span id="upload-btn-text">Open File</span>
+        </label>
+
+        <!-- Column Visibility Dropdown Trigger -->
+        <div class="dropdown-wrap" id="columns-dropdown-wrap">
+          <button type="button" class="btn btn-secondary" id="columns-btn" disabled title="Toggle column visibility">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+              <line x1="15" y1="3" x2="15" y2="21"></line>
+            </svg>
+            <span id="columns-btn-text">Columns</span>
+            <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- Column Visibility Panel -->
+          <div class="dropdown-panel hidden" id="columns-panel">
+            <div class="panel-header">
+              <span class="panel-title">Manage Columns</span>
+              <div class="panel-actions">
+                <button type="button" class="btn-text" id="show-all-cols-btn">Show All</button>
+                <span class="sep">·</span>
+                <button type="button" class="btn-text" id="hide-all-cols-btn">Hide All</button>
+              </div>
+            </div>
+            <div class="panel-search">
+              <input type="text" id="column-search-input" placeholder="Search columns..." />
+            </div>
+            <div class="columns-list" id="columns-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Export CSV Button -->
+        <button type="button" class="btn btn-secondary" id="export-csv-btn" disabled title="Export visible data to CSV">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Export CSV</span>
+        </button>
+
+        <!-- Theme Toggle -->
+        <button type="button" class="btn-icon" id="theme-toggle-btn" title="Toggle color theme" aria-label="Toggle theme">
+          <svg class="sun-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="moon-icon hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Upload Dropzone View (Empty State) -->
+      <section class="upload-view" id="upload-view">
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-glow"></div>
+          <div class="dropzone-content">
+            <div class="dropzone-icon-ring">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+            </div>
+            <h2 class="dropzone-title">Upload your Spreadsheet</h2>
+            <p class="dropzone-sub">
+              Drag & drop your <strong>.xlsx</strong>, <strong>.xls</strong>, or <strong>.csv</strong> file here, or click to browse.
+            </p>
+
+            <div class="dropzone-actions">
+              <label for="file-input" class="btn btn-primary btn-large">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14"></path>
+                </svg>
+                Choose Spreadsheet
+              </label>
+              <button type="button" class="btn btn-secondary btn-large" id="sample-btn-hero">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+                Try Sample Data
+              </button>
+            </div>
+
+            <div class="feature-badges">
+              <div class="badge-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <span>100% Client-Side Private</span>
+              </div>
+              <div class="badge-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span>Instant In-Browser Parse</span>
+              </div>
+              <div class="badge-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                <span>Supports .xlsx, .xls, .csv</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Table View (Active State) -->
+      <section class="table-view hidden" id="table-view">
+        <!-- Toolbar & Filter Bar -->
+        <div class="toolbar" id="table-toolbar">
+          <div class="toolbar-left">
+            <!-- Global search input -->
+            <div class="search-input-wrap">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input type="text" id="global-search-input" placeholder="Search across all columns..." autocomplete="off" />
+              <button type="button" class="btn-clear hidden" id="clear-search-btn" title="Clear search">×</button>
+            </div>
+
+            <!-- Toggle Column Filters Button -->
+            <button type="button" class="btn btn-secondary active-toggle" id="toggle-filter-row-btn" title="Toggle per-column filter row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              <span>Column Filters</span>
+            </button>
+          </div>
+
+          <div class="toolbar-right">
+            <!-- Filter & Sort status pills -->
+            <div class="filter-status-info" id="filter-status-info">
+              <span class="status-count" id="status-count">Showing 0 rows</span>
+            </div>
+
+            <button type="button" class="btn btn-danger-subtle hidden" id="reset-all-filters-btn" title="Reset all sorting and filtering">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              </svg>
+              <span>Reset Filters</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Active Filter Chips Bar -->
+        <div class="filter-chips-bar hidden" id="filter-chips-bar">
+          <span class="chips-label">Active Filters:</span>
+          <div class="chips-container" id="chips-container"></div>
+        </div>
+
+        <!-- Table Scroll Container -->
+        <div class="table-scroll-container" id="table-scroll-container">
+          <table class="data-table" id="data-table">
+            <thead id="table-head">
+              <!-- Dynamically generated header and filter rows -->
+            </thead>
+            <tbody id="table-body">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
+
+          <!-- Empty filter state -->
+          <div class="no-results hidden" id="no-results">
+            <div class="no-results-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+              </svg>
+            </div>
+            <h3>No matching records found</h3>
+            <p>Try adjusting your search query or clearing column filters.</p>
+            <button type="button" class="btn btn-secondary" id="empty-clear-btn">Clear All Filters</button>
+          </div>
+        </div>
+
+        <!-- Pagination & Footer Controls -->
+        <footer class="pagination-bar" id="pagination-bar">
+          <div class="pagination-info">
+            <span id="page-records-summary">Showing 1 to 25 of 100 rows</span>
+          </div>
+
+          <div class="pagination-controls">
+            <!-- Page Size Selector -->
+            <div class="page-size-wrap">
+              <label for="page-size-select">Rows per page:</label>
+              <select id="page-size-select" class="page-size-select">
+                <option value="15">15</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="500">500</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+
+            <!-- Page Buttons -->
+            <div class="page-buttons">
+              <button type="button" class="btn-page" id="first-page-btn" title="First page">«</button>
+              <button type="button" class="btn-page" id="prev-page-btn" title="Previous page">‹</button>
+              <span class="page-indicator" id="page-indicator">Page 1 of 1</span>
+              <button type="button" class="btn-page" id="next-page-btn" title="Next page">›</button>
+              <button type="button" class="btn-page" id="last-page-btn" title="Last page">»</button>
+            </div>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <!-- Toast message overlay -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
