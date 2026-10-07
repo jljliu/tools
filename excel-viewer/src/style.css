@@ -1392,10 +1392,188 @@ html, body {
   background: rgba(59, 130, 246, 0.15);
 }
 
+.th-hide-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.th-cell:hover .th-hide-btn {
+  opacity: 0.65;
+}
+
+.th-hide-btn:hover {
+  opacity: 1 !important;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger);
+}
+
 .th-actions {
   display: flex;
   align-items: center;
   gap: 3px;
+}
+
+/* Unhide Indicator on Header Dividers */
+.th-unhide-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 22px;
+  background: var(--accent-primary);
+  color: #fff;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  cursor: pointer;
+  z-index: 36;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: all var(--transition-fast);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.th-unhide-indicator:hover {
+  transform: translateY(-50%) scale(1.15);
+  background: #2563eb;
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.th-unhide-left {
+  left: -9px;
+}
+
+.th-unhide-right {
+  right: -9px;
+}
+
+/* Column Header Context Menu */
+.col-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 190px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  backdrop-filter: blur(16px);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent-primary);
+}
+
+.context-menu-item svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.context-menu-item:hover svg {
+  color: var(--accent-primary);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 0;
+}
+
+/* Toast Action Button */
+.toast-action-btn {
+  margin-left: 10px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.toast-action-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* Hidden Columns Chip in Filter Toolbar */
+.hidden-cols-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.hidden-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(139, 92, 246, 0.2);
+  padding: 1px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.hidden-tag:hover {
+  background: rgba(139, 92, 246, 0.4);
+  color: #fff;
+}
+
+.unhide-all-btn {
+  background: none;
+  border: none;
+  color: #a78bfa;
+  font-weight: 600;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 4px;
+}
+
+.unhide-all-btn:hover {
+  color: #fff;
 }
 
 /* ==========================================================================

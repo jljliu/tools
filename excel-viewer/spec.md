@@ -64,11 +64,22 @@ A modern, high-performance, 100% client-side spreadsheet viewer web application.
 - **Filter chips**: Displays currently active column filters (e.g. `Quantity: >= 2 and <= 4`) and value checklist filters with individual remove buttons and a "Clear All" action.
 - **Real-time count**: Displays filtered count vs total count (e.g. `Showing 42 of 150 rows`).
 
-### 2.5 Column Visibility
-- **Column selector panel**: Dropdown / drawer listing all headers with checkboxes.
-- **Quick controls**: "Show All" and "Hide All" (preserving at least 1 column).
-- **Search columns**: Quick filter for wide spreadsheets with 20+ columns.
-- **Persistence during session**: Hidden columns do not render in header or data cells, but maintain their sorting/filter states when unhidden.
+### 2.5 Column Visibility & Easy Hide / Unhide Workflows
+- **Multi-Point Intuitive Column Hiding**:
+  - **Header Hover 1-Click Hide Button (`.th-hide-btn`)**: Subtle eye-slash button reveals on column header hover for instant 1-click column hiding.
+  - **Filter Popover Action Button (`#popover-hide-col-btn`)**: Dedicated "Hide Column" button directly inside the Excel filter popover header.
+  - **Right-Click Context Menu (`.col-context-menu`)**: Right-clicking any column header opens a native-feeling context menu with options:
+    - *Hide Column*
+    - *Hide Other Columns* (focus solely on the selected column)
+    - *Unhide All Columns*
+    - *Sort Ascending / Descending*
+    - *Filter Options...*
+  - **Header Divider Unhide Indicators (`.th-unhide-indicator`)**: Visual pill/divider badges rendered on column boundaries where hidden columns exist (`⇥`, `⇥⇤`, `⇤`). Clicking instantly restores the adjacent hidden column(s).
+  - **Active Toolbar Hidden Columns Chip**: Filter toolbar prominently displays a purple chip `👁️ N Hidden: [ColumnName +]` allowing 1-click restoration of individual columns or "Unhide All".
+  - **Navbar Columns Dropdown**: Top bar dropdown listing all columns with checkboxes, search input, and bulk "Show All" / "Hide All" controls.
+  - **Interactive Undo Toast**: Every column hiding action triggers an interactive toast with a 1-click **Undo** button.
+  - **Minimum Visible Column Guard**: Enforces at least 1 column remains visible to prevent accidental total table collapse.
+- **Persistence during session**: Hidden columns do not render in header or data cells, but maintain their underlying sorting and filter states when unhidden.
 
 ### 2.6 Pagination & DOM Virtualization Engine (Scale to Millions of Rows)
 - **Page sizes**: 15, 25, 50, 100, 500, or "All (Virtual Scroll)".
@@ -85,10 +96,13 @@ A modern, high-performance, 100% client-side spreadsheet viewer web application.
   - **Delegated Event Architecture**: Table-level event delegation handles cell copying (`dblclick`) without attaching per-cell event listeners or closures.
 
 ### 2.7 Export & Utilities
-- Export visible / filtered table rows to CSV via Web Worker.
-- Safe chunked streaming export (5,000-row chunks directly to `Blob`) preventing V8 512MB max string length crashes (`RangeError: Invalid string length`).
-- Copy table data to clipboard with feedback toasts.
-- Light / Dark theme toggle.
+- **Visible-Only CSV Export Guarantee**:
+  - The "Export CSV" feature strictly exports only unhidden columns (`visibleColumns`).
+  - Any column that has been hidden is automatically excluded from both the CSV header row and every exported data record chunk.
+  - Generates clear feedback toast informing the user of the exact exported row count, visible column count, and number of excluded hidden columns (e.g., `Exported 100 rows and 4 visible columns (2 hidden columns excluded) to CSV!`).
+- **Safe Chunked Streaming Export**: Processes in 5,000-row chunks directly to `Blob` inside the Web Worker, preventing V8 string length exhaustion crashes (`RangeError: Invalid string length`).
+- **Data Clipboard Copy**: Double-click any cell to copy value with immediate visual feedback toast.
+- **Theme Support**: Seamless dark and light themes with CSS custom properties.
 
 ### 2.8 Large File & Performance Architecture (Millions of Rows Support)
 - **Dedicated Web Worker (`worker.js`)**: All spreadsheet parsing, CSV streaming, data indexing, sorting, filtering, and CSV export execute in a background Web Worker thread. Main thread UI maintains 60fps responsiveness.

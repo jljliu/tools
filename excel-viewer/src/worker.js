@@ -741,7 +741,9 @@ function getPageSlice(page, pageSize) {
 function handleExportCsv({ visibleCols, baseFileName }) {
   self.postMessage({ type: 'STATUS', message: 'Generating CSV export...' });
 
-  const colIndices = visibleCols.sort((a, b) => a - b);
+  const colIndices = (Array.isArray(visibleCols) && visibleCols.length > 0)
+    ? [...visibleCols].sort((a, b) => a - b)
+    : allHeaders.map((_, i) => i);
   const headers = colIndices.map((c) => allHeaders[c]);
 
   const CHUNK_SIZE = 5000;
@@ -773,6 +775,7 @@ function handleExportCsv({ visibleCols, baseFileName }) {
     type: 'EXPORT_CSV_RESULT',
     blob,
     count: activeFilteredIndices.length,
+    colCount: colIndices.length,
     fileName: `${baseFileName || 'export'}_filtered.csv`
   });
 }

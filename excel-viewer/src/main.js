@@ -127,15 +127,17 @@ const elements = {
   popoverValuesList: document.getElementById('popover-values-list'),
   popoverTruncateBanner: document.getElementById('popover-truncate-banner'),
   popoverCancelBtn: document.getElementById('popover-cancel-btn'),
-  popoverApplyBtn: document.getElementById('popover-apply-btn'),
-  // Number Filter Elements in Popover
-  popoverNumSection: document.getElementById('popover-num-section'),
-  popoverNumClearBtn: document.getElementById('popover-num-clear-btn'),
-  popoverNumOpSelect: document.getElementById('popover-num-op-select'),
-  popoverNumVal1: document.getElementById('popover-num-val1'),
-  popoverNumVal2: document.getElementById('popover-num-val2'),
-  popoverNumBetweenRow: document.getElementById('popover-num-between-row'),
-  popoverNumApplyBtn: document.getElementById('popover-num-apply-btn'),
+  // Popover Hide Column Button
+  popoverHideColBtn: document.getElementById('popover-hide-col-btn'),
+  // Column Header Context Menu
+  colContextMenu: document.getElementById('col-context-menu'),
+  ctxHideColBtn: document.getElementById('ctx-hide-col-btn'),
+  ctxHideColText: document.getElementById('ctx-hide-col-text'),
+  ctxHideOthersBtn: document.getElementById('ctx-hide-others-btn'),
+  ctxUnhideAllBtn: document.getElementById('ctx-unhide-all-btn'),
+  ctxSortAscBtn: document.getElementById('ctx-sort-asc-btn'),
+  ctxSortDescBtn: document.getElementById('ctx-sort-desc-btn'),
+  ctxFilterColBtn: document.getElementById('ctx-filter-col-btn'),
 };
 
 // ==========================================================================
@@ -410,23 +412,27 @@ function bindEvents() {
   });
 
   elements.showAllColsBtn.addEventListener('click', () => {
-    state.allHeaders.forEach((_, idx) => state.visibleColumns.add(idx));
-    updateColumnsVisibility();
+    unhideAllColumns();
   });
 
   elements.hideAllColsBtn.addEventListener('click', () => {
     state.visibleColumns.clear();
     state.visibleColumns.add(0);
     updateColumnsVisibility();
+    showToast(`Showing only column "${state.allHeaders[0] || 'Column 1'}".`, 'info', {
+      text: 'Undo',
+      onClick: () => unhideAllColumns()
+    });
   });
 
-  // Export CSV
+  // Export CSV (Strictly exports unhidden visible columns only)
   elements.exportCsvBtn.addEventListener('click', () => {
-    showLoading('Exporting CSV', 'Formatting filtered rows...');
+    const visibleCols = Array.from(state.visibleColumns).sort((a, b) => a - b);
+    showLoading('Exporting CSV', `Formatting ${visibleCols.length} visible column${visibleCols.length > 1 ? 's' : ''}...`);
     worker.postMessage({
       type: 'EXPORT_CSV',
       payload: {
-        visibleCols: Array.from(state.visibleColumns),
+        visibleCols,
         baseFileName: (state.fileName || 'export').replace(/\.[^/.]+$/, '')
       }
     });
@@ -593,6 +599,78 @@ function bindPopoverEvents() {
   };
   elements.popoverNumVal1.addEventListener('keydown', onNumInputKeydown);
   elements.popoverNumVal2.addEventListener('keydown', onNumInputKeydown);
+
+  // Popover Hide Column Action
+  elements.popoverHideColBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+    const colToHide = activePopoverColIdx;
+    closeExcelFilterPopover();
+    hideColumn(colToHide);
+  });
+
+  // Column Header Context Menu Actions
+  elements.ctxHideColBtn.addEventListener('click', () => {
+    if (activeCtxColIdx !== null) {
+      const idx = activeCtxColIdx;
+      closeColContextMenu();
+      hideColumn(idx);
+    }
+  });
+
+  elements.ctxHideOthersBtn.addEventListener('click', () => {
+    if (activeCtxColIdx !== null) {
+      const idx = activeCtxColIdx;
+      closeColContextMenu();
+      hideOtherColumns(idx);
+    }
+  });
+
+  elements.ctxUnhideAllBtn.addEventListener('click', () => {
+    closeColContextMenu();
+    unhideAllColumns();
+  });
+
+  elements.ctxSortAscBtn.addEventListener('click', () => {
+    if (activeCtxColIdx !== null) {
+      const idx = activeCtxColIdx;
+      closeColContextMenu();
+      state.sortColumn = idx;
+      state.sortDirection = 'asc';
+      updateSortHeadersUI();
+      queryWorker(1);
+    }
+  });
+
+  elements.ctxSortDescBtn.addEventListener('click', () => {
+    if (activeCtxColIdx !== null) {
+      const idx = activeCtxColIdx;
+      closeColContextMenu();
+      state.sortColumn = idx;
+      state.sortDirection = 'desc';
+      updateSortHeadersUI();
+      queryWorker(1);
+    }
+  });
+
+  elements.ctxFilterColBtn.addEventListener('click', () => {
+    if (activeCtxColIdx !== null) {
+      const idx = activeCtxColIdx;
+      closeColContextMenu();
+      const th = document.getElementById(`th-col-${idx}`);
+      const btn = th ? th.querySelector('.th-filter-btn') : null;
+      if (btn) openExcelFilterPopover(idx, btn);
+    }
+  });
+
+  // Dismiss context menu on click or escape
+  window.addEventListener('click', () => closeColContextMenu());
+  window.addEventListener('scroll', () => closeColContextMenu(), true);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeColContextMenu();
+      closeExcelFilterPopover();
+    }
+  });
 }
 
 // ==========================================================================
@@ -1496,8 +1574,10 @@ function updateFilterChips() {
   }
 
   elements.chipsContainer.innerHTML = '';
-  if (chips.length > 0) {
+  if (chips.length > 0 || state.visibleColumns.size < state.allHeaders.length) {
     elements.filterChipsBar.classList.remove('hidden');
+
+    // Render active filter chips
     chips.forEach((c) => {
       const chipEl = document.createElement('div');
       chipEl.className = 'filter-chip';
@@ -1505,9 +1585,110 @@ function updateFilterChips() {
       chipEl.querySelector('.chip-remove').addEventListener('click', c.remove);
       elements.chipsContainer.appendChild(chipEl);
     });
+
+    // Render hidden columns indicator chip
+    const hiddenCount = state.allHeaders.length - state.visibleColumns.size;
+    if (hiddenCount > 0 && state.allHeaders.length > 0) {
+      const hiddenCols = state.allHeaders
+        .map((name, i) => ({ name, idx: i }))
+        .filter(({ idx }) => !state.visibleColumns.has(idx));
+
+      const hiddenChipEl = document.createElement('div');
+      hiddenChipEl.className = 'hidden-cols-chip';
+      hiddenChipEl.innerHTML = `<span>👁️ ${hiddenCount} Hidden:</span>`;
+
+      hiddenCols.slice(0, 4).forEach((col) => {
+        const tag = document.createElement('span');
+        tag.className = 'hidden-tag';
+        tag.title = `Click to unhide "${col.name}"`;
+        tag.innerHTML = `${escapeHtml(col.name)} <strong>+</strong>`;
+        tag.addEventListener('click', () => unhideColumn(col.idx));
+        hiddenChipEl.appendChild(tag);
+      });
+
+      if (hiddenCols.length > 4) {
+        const more = document.createElement('span');
+        more.style.fontSize = '0.73rem';
+        more.textContent = `+${hiddenCols.length - 4} more`;
+        hiddenChipEl.appendChild(more);
+      }
+
+      const unhideAllBtn = document.createElement('button');
+      unhideAllBtn.type = 'button';
+      unhideAllBtn.className = 'unhide-all-btn';
+      unhideAllBtn.textContent = 'Unhide All';
+      unhideAllBtn.title = 'Unhide all columns';
+      unhideAllBtn.addEventListener('click', () => unhideAllColumns());
+      hiddenChipEl.appendChild(unhideAllBtn);
+
+      elements.chipsContainer.appendChild(hiddenChipEl);
+    }
   } else {
     elements.filterChipsBar.classList.add('hidden');
   }
+}
+
+// Column Context Menu State & Handlers
+let activeCtxColIdx = null;
+
+function openColContextMenu(e, colIdx) {
+  activeCtxColIdx = colIdx;
+  const colName = state.allHeaders[colIdx] || `Column ${colIdx + 1}`;
+  elements.ctxHideColText.textContent = `Hide "${colName}"`;
+
+  const hiddenCount = state.allHeaders.length - state.visibleColumns.size;
+  elements.ctxUnhideAllBtn.style.display = hiddenCount > 0 ? 'flex' : 'none';
+
+  const menu = elements.colContextMenu;
+  menu.classList.remove('hidden');
+
+  const x = Math.min(e.clientX, window.innerWidth - 215);
+  const y = Math.min(e.clientY, window.innerHeight - 230);
+  menu.style.left = `${Math.max(10, x)}px`;
+  menu.style.top = `${Math.max(10, y)}px`;
+}
+
+function closeColContextMenu() {
+  elements.colContextMenu.classList.add('hidden');
+  activeCtxColIdx = null;
+}
+
+function hideColumn(colIdx) {
+  if (state.visibleColumns.size <= 1) {
+    showToast('At least one column must remain visible.', 'error');
+    return;
+  }
+  const colName = state.allHeaders[colIdx] || `Column ${colIdx + 1}`;
+  state.visibleColumns.delete(colIdx);
+  updateColumnsVisibility();
+  showToast(`Column "${colName}" hidden.`, 'info', {
+    text: 'Undo',
+    onClick: () => unhideColumn(colIdx)
+  });
+}
+
+function unhideColumn(colIdx) {
+  state.visibleColumns.add(colIdx);
+  updateColumnsVisibility();
+  const colName = state.allHeaders[colIdx] || `Column ${colIdx + 1}`;
+  showToast(`Column "${colName}" unhidden.`, 'success');
+}
+
+function unhideAllColumns() {
+  state.allHeaders.forEach((_, idx) => state.visibleColumns.add(idx));
+  updateColumnsVisibility();
+  showToast('All columns are now visible.', 'success');
+}
+
+function hideOtherColumns(colIdx) {
+  state.visibleColumns.clear();
+  state.visibleColumns.add(colIdx);
+  updateColumnsVisibility();
+  const colName = state.allHeaders[colIdx] || `Column ${colIdx + 1}`;
+  showToast(`Showing only column "${colName}".`, 'info', {
+    text: 'Undo',
+    onClick: () => unhideAllColumns()
+  });
 }
 
 // ==========================================================================
@@ -1524,17 +1705,36 @@ function renderTableHeader() {
   const thIndex = document.createElement('th');
   thIndex.className = 'th-cell';
   thIndex.textContent = '#';
+
+  const visibleIndices = Array.from(state.visibleColumns).sort((a, b) => a - b);
+
+  // If first visible column is not 0, there are hidden columns at the very start
+  if (visibleIndices.length > 0 && visibleIndices[0] > 0) {
+    const unhideStartBtn = document.createElement('button');
+    unhideStartBtn.type = 'button';
+    unhideStartBtn.className = 'th-unhide-indicator th-unhide-right';
+    const hiddenCount = visibleIndices[0];
+    unhideStartBtn.title = `Click to unhide ${hiddenCount} hidden column${hiddenCount > 1 ? 's' : ''}`;
+    unhideStartBtn.textContent = '⇥';
+    unhideStartBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      for (let i = 0; i < visibleIndices[0]; i++) {
+        state.visibleColumns.add(i);
+      }
+      updateColumnsVisibility();
+      showToast(`Unhid ${hiddenCount} column${hiddenCount > 1 ? 's' : ''}.`, 'success');
+    });
+    thIndex.appendChild(unhideStartBtn);
+  }
   trTitle.appendChild(thIndex);
 
-  state.allHeaders.forEach((headerName, idx) => {
-    if (!state.visibleColumns.has(idx)) return;
-
+  visibleIndices.forEach((idx, vOrder) => {
+    const headerName = state.allHeaders[idx] || `Column ${idx + 1}`;
     const th = document.createElement('th');
     th.className = 'th-cell th-sortable';
     th.id = `th-col-${idx}`;
-    th.title = `Click to sort by "${headerName}"`;
+    th.title = `Click to sort by "${headerName}", right-click for options`;
 
-    // Calculate smart width based on header length (minimum 140px)
     const calcWidth = state.columnWidths[idx] || Math.min(360, Math.max(150, headerName.length * 9 + 65));
     th.style.width = `${calcWidth}px`;
     th.style.minWidth = '140px';
@@ -1546,9 +1746,25 @@ function renderTableHeader() {
     titleSpan.className = 'th-title';
     titleSpan.textContent = headerName;
 
-    // Right action icons (Excel filter funnel button + sort indicator)
+    // Right action icons
     const thActions = document.createElement('div');
     thActions.className = 'th-actions';
+
+    // Quick Hide Column Button
+    const hideBtn = document.createElement('button');
+    hideBtn.type = 'button';
+    hideBtn.className = 'th-hide-btn';
+    hideBtn.title = `Hide column "${headerName}"`;
+    hideBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+        <line x1="1" y1="1" x2="23" y2="23"></line>
+      </svg>
+    `;
+    hideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideColumn(idx);
+    });
 
     const filterBtn = document.createElement('button');
     filterBtn.type = 'button';
@@ -1567,6 +1783,7 @@ function renderTableHeader() {
     sortIcon.id = `sort-icon-${idx}`;
     sortIcon.innerHTML = getSortIconSvg('none');
 
+    thActions.appendChild(hideBtn);
     thActions.appendChild(filterBtn);
     thActions.appendChild(sortIcon);
 
@@ -1586,7 +1803,49 @@ function renderTableHeader() {
     });
     th.appendChild(resizer);
 
+    // Unhide indicator between columns or at the end
+    const nextIdx = visibleIndices[vOrder + 1];
+    if (nextIdx !== undefined && nextIdx - idx > 1) {
+      const gapCount = nextIdx - idx - 1;
+      const unhideBetweenBtn = document.createElement('button');
+      unhideBetweenBtn.type = 'button';
+      unhideBetweenBtn.className = 'th-unhide-indicator th-unhide-right';
+      unhideBetweenBtn.title = `Click to unhide ${gapCount} hidden column${gapCount > 1 ? 's' : ''}`;
+      unhideBetweenBtn.textContent = '⇥⇤';
+      unhideBetweenBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        for (let g = idx + 1; g < nextIdx; g++) {
+          state.visibleColumns.add(g);
+        }
+        updateColumnsVisibility();
+        showToast(`Unhid ${gapCount} column${gapCount > 1 ? 's' : ''}.`, 'success');
+      });
+      th.appendChild(unhideBetweenBtn);
+    } else if (vOrder === visibleIndices.length - 1 && idx < state.allHeaders.length - 1) {
+      const endGapCount = state.allHeaders.length - 1 - idx;
+      const unhideEndBtn = document.createElement('button');
+      unhideEndBtn.type = 'button';
+      unhideEndBtn.className = 'th-unhide-indicator th-unhide-right';
+      unhideEndBtn.title = `Click to unhide ${endGapCount} hidden column${endGapCount > 1 ? 's' : ''}`;
+      unhideEndBtn.textContent = '⇤';
+      unhideEndBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        for (let g = idx + 1; g < state.allHeaders.length; g++) {
+          state.visibleColumns.add(g);
+        }
+        updateColumnsVisibility();
+        showToast(`Unhid ${endGapCount} column${endGapCount > 1 ? 's' : ''}.`, 'success');
+      });
+      th.appendChild(unhideEndBtn);
+    }
+
     th.addEventListener('click', () => handleHeaderSortClick(idx));
+    th.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openColContextMenu(e, idx);
+    });
+
     trTitle.appendChild(th);
   });
 
@@ -1839,13 +2098,26 @@ function renderColumnsList(filterQuery = '') {
 function updateColumnsVisibility() {
   domPool.isInitialized = false;
   updateColumnsVisibilityBadge();
+  updateFilterChips();
   renderTableHeader();
   renderColumnsList(elements.columnSearchInput.value.trim().toLowerCase());
   queryWorker();
 }
 
 function updateColumnsVisibilityBadge() {
-  elements.columnsBtnText.textContent = `Columns (${state.visibleColumns.size}/${state.allHeaders.length})`;
+  const visibleCount = state.visibleColumns.size;
+  const totalCount = state.allHeaders.length;
+  const hiddenCount = totalCount - visibleCount;
+
+  if (hiddenCount > 0) {
+    elements.columnsBtnText.textContent = `Columns (${visibleCount}/${totalCount} • ${hiddenCount} Hidden)`;
+    elements.columnsBtn.classList.add('has-hidden-cols');
+    elements.exportCsvBtn.title = `Export ${visibleCount} visible columns to CSV (${hiddenCount} hidden columns excluded)`;
+  } else {
+    elements.columnsBtnText.textContent = `Columns (${totalCount}/${totalCount})`;
+    elements.columnsBtn.classList.remove('has-hidden-cols');
+    elements.exportCsvBtn.title = 'Export all columns to CSV';
+  }
 }
 
 // ==========================================================================
@@ -1908,7 +2180,7 @@ function updatePaginationUI() {
 // ==========================================================================
 // Export CSV Result Handling
 // ==========================================================================
-function handleExportCsvResult({ blob, fileName, count }) {
+function handleExportCsvResult({ blob, fileName, count, colCount }) {
   hideLoading();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1918,16 +2190,37 @@ function handleExportCsvResult({ blob, fileName, count }) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`Exported ${count.toLocaleString()} rows to CSV!`, 'success');
+
+  const exportedCols = colCount || state.visibleColumns.size;
+  const hiddenCount = state.allHeaders.length - exportedCols;
+  const hiddenNotice = hiddenCount > 0 ? ` (${hiddenCount} hidden column${hiddenCount > 1 ? 's' : ''} excluded)` : '';
+  showToast(`Exported ${count.toLocaleString()} rows and ${exportedCols} visible columns${hiddenNotice} to CSV!`, 'success');
 }
 
 // ==========================================================================
 // Toast Notification Utility
 // ==========================================================================
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', action = null) {
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
-  toast.textContent = message;
+
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = message;
+  toast.appendChild(msgSpan);
+
+  if (action && action.text && action.onClick) {
+    const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'toast-action-btn';
+    actionBtn.textContent = action.text;
+    actionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      action.onClick();
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    });
+    toast.appendChild(actionBtn);
+  }
+
   elements.toastContainer.appendChild(toast);
 
   setTimeout(() => {
@@ -1939,7 +2232,7 @@ function showToast(message, type = 'info') {
         toast.parentNode.removeChild(toast);
       }
     }, 250);
-  }, 3400);
+  }, 4000);
 }
 
 function escapeHtml(str) {
