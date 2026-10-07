@@ -35,6 +35,9 @@ const virtualState = {
   pendingOffset: -1,
   viewportStartIndex: 0,
   viewportEndIndex: 0,
+  renderedStartIndex: -1,
+  renderedEndIndex: -1,
+  renderedTotalRows: -1,
 };
 
 // DOM Recycling Pool (Reuses fixed ~45 <tr> elements, zero allocations during scroll)
@@ -334,6 +337,9 @@ function bindEvents() {
     state.pageSize = val === 'all' ? Infinity : parseInt(val, 10);
     state.currentPage = 1;
     domPool.isInitialized = false;
+    virtualState.renderedStartIndex = -1;
+    virtualState.renderedEndIndex = -1;
+    virtualState.renderedTotalRows = -1;
     elements.tableScrollContainer.scrollTop = 0;
     queryWorker(1);
   });
@@ -438,20 +444,24 @@ function bindPopoverEvents() {
 // ==========================================================================
 function getVirtualMetrics() {
   const totalRows = state.filteredCount;
-  const actualTotalHeight = totalRows * ROW_HEIGHT;
-  const scrollHeight = Math.min(actualTotalHeight, MAX_BROWSER_SCROLL_HEIGHT);
+  const headerHeight = elements.tableHead ? (elements.tableHead.offsetHeight || 73) : 73;
+  const viewportHeight = elements.tableScrollContainer.clientHeight || 600;
+  const availableViewportHeight = Math.max(1, viewportHeight - headerHeight);
+
+  const actualTotalDataHeight = totalRows * ROW_HEIGHT;
+  const maxBrowserDataHeight = Math.max(0, MAX_BROWSER_SCROLL_HEIGHT - headerHeight);
+  const dataScrollHeight = Math.min(actualTotalDataHeight, maxBrowserDataHeight);
 
   const scrollTop = elements.tableScrollContainer.scrollTop || 0;
-  const viewportHeight = elements.tableScrollContainer.clientHeight || 600;
 
-  const maxContainerScroll = Math.max(1, scrollHeight - viewportHeight);
-  const maxVirtualScroll = Math.max(0, actualTotalHeight - viewportHeight);
+  const maxContainerScroll = Math.max(1, dataScrollHeight - availableViewportHeight);
+  const maxVirtualScroll = Math.max(0, actualTotalDataHeight - availableViewportHeight);
 
   // Proportional scroll ratio mapping 0.0 to 1.0 (reaches very last row accurately)
   const scrollRatio = Math.min(1, Math.max(0, scrollTop / maxContainerScroll));
   const virtualScrollTop = scrollRatio * maxVirtualScroll;
 
-  const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
+  const visibleCount = Math.ceil(availableViewportHeight / ROW_HEIGHT);
   let startIndex = Math.max(0, Math.floor(virtualScrollTop / ROW_HEIGHT) - BUFFER_ROWS);
   let endIndex = Math.min(totalRows, startIndex + visibleCount + 2 * BUFFER_ROWS);
 
@@ -461,10 +471,10 @@ function getVirtualMetrics() {
   }
 
   const renderedCount = Math.max(0, endIndex - startIndex);
-  const heightScale = actualTotalHeight > scrollHeight ? (actualTotalHeight / scrollHeight) : 1;
+  const heightScale = actualTotalDataHeight > dataScrollHeight ? (actualTotalDataHeight / dataScrollHeight) : 1;
   const topPadding = Math.max(0, Math.floor((startIndex * ROW_HEIGHT) / heightScale));
   const renderedHeight = Math.floor((renderedCount * ROW_HEIGHT) / heightScale);
-  const bottomPadding = Math.max(0, scrollHeight - topPadding - renderedHeight);
+  const bottomPadding = Math.max(0, dataScrollHeight - topPadding - renderedHeight);
 
   return {
     totalRows,
@@ -488,7 +498,7 @@ function initVirtualDomPool() {
   domPool.topSpacerTr.className = 'virtual-spacer-tr';
   domPool.topSpacerTd = document.createElement('td');
   domPool.topSpacerTd.colSpan = colCount;
-  domPool.topSpacerTd.style.cssText = 'height: 0px; padding: 0; border: none; background: transparent;';
+  domPool.topSpacerTd.style.cssText = 'height: 0px; padding: 0; margin: 0; border: none; background: transparent; overflow: hidden; box-sizing: border-box;';
   domPool.topSpacerTr.appendChild(domPool.topSpacerTd);
   elements.tableBody.appendChild(domPool.topSpacerTr);
 
@@ -497,14 +507,14 @@ function initVirtualDomPool() {
   domPool.bottomSpacerTr.className = 'virtual-spacer-tr';
   domPool.bottomSpacerTd = document.createElement('td');
   domPool.bottomSpacerTd.colSpan = colCount;
-  domPool.bottomSpacerTd.style.cssText = 'height: 0px; padding: 0; border: none; background: transparent;';
+  domPool.bottomSpacerTd.style.cssText = 'height: 0px; padding: 0; margin: 0; border: none; background: transparent; overflow: hidden; box-sizing: border-box;';
   domPool.bottomSpacerTr.appendChild(domPool.bottomSpacerTd);
   elements.tableBody.appendChild(domPool.bottomSpacerTr);
 
   domPool.isInitialized = true;
 }
 
-function renderVirtualWindow() {
+function renderVirtualWindow(force = false) {
   if (state.pageSize !== Infinity) return;
 
   const metrics = getVirtualMetrics();
@@ -534,7 +544,18 @@ function renderVirtualWindow() {
     }
   }
 
-  renderVirtualDOM(metrics);
+  // Avoid unnecessary DOM updates if rendered row window and row count haven't changed
+  const rangeChanged = metrics.startIndex !== virtualState.renderedStartIndex ||
+                       metrics.endIndex !== virtualState.renderedEndIndex ||
+                       metrics.totalRows !== virtualState.renderedTotalRows;
+
+  if (rangeChanged || force) {
+    virtualState.renderedStartIndex = metrics.startIndex;
+    virtualState.renderedEndIndex = metrics.endIndex;
+    virtualState.renderedTotalRows = metrics.totalRows;
+    renderVirtualDOM(metrics);
+  }
+
   updatePaginationUI();
 }
 
@@ -714,7 +735,7 @@ function handleWindowResult(data) {
   }
 
   if (state.pageSize === Infinity) {
-    renderVirtualWindow();
+    renderVirtualWindow(true);
   }
 }
 
@@ -1164,7 +1185,10 @@ function handleQueryResult(data) {
     virtualState.cacheRows = data.rows || [];
     virtualState.isFetchingWindow = false;
     virtualState.lastRequestedOffset = virtualState.cacheOffset;
-    renderVirtualWindow();
+    virtualState.renderedStartIndex = -1;
+    virtualState.renderedEndIndex = -1;
+    virtualState.renderedTotalRows = -1;
+    renderVirtualWindow(true);
   } else {
     renderTableBody(data.rows);
   }

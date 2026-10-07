@@ -770,6 +770,7 @@ html, body {
 .table-scroll-container {
   flex: 1;
   overflow: auto;
+  overflow-anchor: none !important;
   background: var(--bg-primary);
   position: relative;
 }
@@ -781,6 +782,7 @@ html, body {
   border-spacing: 0;
   font-size: 0.82rem;
   table-layout: fixed;
+  overflow-anchor: none !important;
 }
 
 /* Table Header */
@@ -788,6 +790,11 @@ html, body {
   position: sticky;
   top: 0;
   z-index: 20;
+  overflow-anchor: none !important;
+}
+
+.data-table tbody {
+  overflow-anchor: none !important;
 }
 
 .th-row {
@@ -929,8 +936,13 @@ html, body {
   background: rgba(59, 130, 246, 0.08);
 }
 
-/* Table Body Rows & Cells */
+/* Table Body Rows & Cells - Strictly locked to 35px for virtual scrolling */
 .tb-row {
+  height: 35px !important;
+  min-height: 35px !important;
+  max-height: 35px !important;
+  box-sizing: border-box !important;
+  overflow-anchor: none !important;
   transition: background var(--transition-fast);
 }
 
@@ -947,7 +959,11 @@ html, body {
 }
 
 .td-cell {
-  padding: 7px 12px;
+  height: 35px !important;
+  min-height: 35px !important;
+  max-height: 35px !important;
+  line-height: 33px !important;
+  padding: 0 12px !important;
   border-bottom: 1px solid var(--border-subtle);
   border-right: 1px solid var(--border-subtle);
   color: var(--text-primary);
@@ -957,6 +973,8 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
+  box-sizing: border-box !important;
+  overflow-anchor: none !important;
 }
 
 .td-cell:first-child {
@@ -973,6 +991,9 @@ html, body {
   left: 0;
   z-index: 15;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.12);
+  height: 35px !important;
+  line-height: 33px !important;
+  box-sizing: border-box !important;
 }
 
 .td-number {
@@ -1611,6 +1632,7 @@ html, body {
    ========================================================================== */
 .virtual-spacer-tr {
   pointer-events: none;
+  overflow-anchor: none !important;
 }
 
 .virtual-spacer-tr td {
@@ -1620,6 +1642,9 @@ html, body {
   background: transparent !important;
   line-height: 0 !important;
   font-size: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  overflow-anchor: none !important;
 }
 
 .tb-skeleton-row {
