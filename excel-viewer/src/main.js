@@ -127,6 +127,14 @@ const elements = {
   popoverValuesList: document.getElementById('popover-values-list'),
   popoverTruncateBanner: document.getElementById('popover-truncate-banner'),
   popoverCancelBtn: document.getElementById('popover-cancel-btn'),
+  popoverApplyBtn: document.getElementById('popover-apply-btn'),
+  popoverNumSection: document.getElementById('popover-num-section'),
+  popoverNumOpSelect: document.getElementById('popover-num-op-select'),
+  popoverNumVal1: document.getElementById('popover-num-val1'),
+  popoverNumBetweenRow: document.getElementById('popover-num-between-row'),
+  popoverNumVal2: document.getElementById('popover-num-val2'),
+  popoverNumApplyBtn: document.getElementById('popover-num-apply-btn'),
+  popoverNumClearBtn: document.getElementById('popover-num-clear-btn'),
   // Popover Hide Column Button
   popoverHideColBtn: document.getElementById('popover-hide-col-btn'),
   // Column Header Context Menu
