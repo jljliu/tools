@@ -17,14 +17,18 @@ A modern, high-performance, 100% client-side spreadsheet viewer web application.
 ### 2.2 Table Rendering & Structure
 - **Header detection**: First row is parsed as column headers; subsequent rows are data records.
 - **Empty column names**: Automatically labelled as `Column 1`, `Column 2`, etc.
-- **Row numbering**: Fixed leftmost index column `#` for easy referencing.
+- **Column Width & Horizontal Scrolling (Wide Spreadsheets Support)**:
+  - **Guaranteed Minimum Width**: Every data column enforces a minimum width of `140px` (defaulting dynamically between `150px` and `360px` based on header length), ensuring that spreadsheets with 50–100+ columns never collapse into illegible slivers.
+  - **Fluid Container Expansion**: The table uses `width: max-content; min-width: 100%`, enabling smooth horizontal scrolling across wide sheets while filling the screen for narrower sheets.
+  - **Interactive Column Resizing**: Each column header features a draggable `.th-resizer` handle on its right border. Users can drag to customize any column's width, or double-click the handle to auto-fit.
+  - **Frozen Pane Row Numbering**: The `#` index column is pinned sticky on the left (`position: sticky; left: 0; z-index: 15/35`) with elevation shadows, maintaining row referencing while scrolling horizontally.
+- **Sticky headers**: Header row remains pinned while scrolling through large datasets.
 - **Cell formatting & auto-detection**:
   - Right-aligned monospace presentation for numbers and currencies.
   - Semantic pill tags for common status values (e.g. `Completed`, `Active`, `Pending`, `Cancelled`).
   - Clickable URL links when cell contains valid web addresses.
   - Muted placeholders (`—`) for blank/null values.
-  - Click to copy cell value with toast notification.
-- **Sticky headers**: Header row remains pinned while scrolling through large datasets.
+  - Double-click to copy cell value with toast notification.
 
 ### 2.3 Sorting
 - **Header sorting**: Clicking a column header toggles through:

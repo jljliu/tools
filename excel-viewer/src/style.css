@@ -775,7 +775,8 @@ html, body {
 }
 
 .data-table {
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.82rem;
@@ -806,17 +807,39 @@ html, body {
   user-select: none;
   white-space: nowrap;
   transition: background var(--transition-fast);
+  min-width: 140px;
+  position: relative;
 }
 
 .th-cell:first-child {
-  width: 50px;
-  min-width: 50px;
-  max-width: 50px;
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
   text-align: center;
   color: var(--text-muted);
   font-family: var(--font-mono);
   background: var(--bg-surface);
-  z-index: 21;
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 35;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.12);
+}
+
+.th-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 10;
+}
+
+.th-resizer:hover,
+.th-resizer.is-resizing {
+  background: var(--accent-primary);
 }
 
 .th-sortable {
@@ -869,11 +892,21 @@ html, body {
   border-right: 1px solid var(--border-subtle);
   padding: 4px 6px;
   z-index: 19;
+  min-width: 140px;
 }
 
 .filter-cell:first-child {
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
   text-align: center;
   color: var(--text-muted);
+  background: var(--bg-elevated);
+  position: sticky;
+  left: 0;
+  top: 38px;
+  z-index: 34;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.12);
 }
 
 .col-filter-input {
@@ -919,7 +952,8 @@ html, body {
   border-right: 1px solid var(--border-subtle);
   color: var(--text-primary);
   white-space: nowrap;
-  max-width: 320px;
+  min-width: 140px;
+  max-width: 450px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
@@ -932,12 +966,13 @@ html, body {
   font-size: 0.75rem;
   background: var(--bg-surface);
   user-select: none;
-  width: 50px;
-  min-width: 50px;
-  max-width: 50px;
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
   position: sticky;
   left: 0;
-  z-index: 10;
+  z-index: 15;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.12);
 }
 
 .td-number {

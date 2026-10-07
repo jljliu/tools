@@ -15,6 +15,7 @@ const state = {
   globalSearch: '',
   columnFilters: {}, // Inline substring query filters
   columnValueFilters: {}, // Excel-style unique values checklists: colIdx -> Array of allowed strings
+  columnWidths: {}, // colIdx -> custom pixel width
   isFilterRowVisible: true,
   pageSize: 25,
   currentPage: 1,
@@ -1018,6 +1019,7 @@ function handleParseSuccess(data) {
   state.globalSearch = '';
   state.columnFilters = {};
   state.columnValueFilters = {};
+  state.columnWidths = {};
   state.currentPage = 1;
 
   elements.globalSearchInput.value = '';
@@ -1070,6 +1072,7 @@ function handleSheetSwitched(data) {
   state.globalSearch = '';
   state.columnFilters = {};
   state.columnValueFilters = {};
+  state.columnWidths = {};
   state.currentPage = 1;
 
   elements.globalSearchInput.value = '';
@@ -1306,6 +1309,11 @@ function renderTableHeader() {
     th.id = `th-col-${idx}`;
     th.title = `Click to sort by "${headerName}"`;
 
+    // Calculate smart width based on header length (minimum 140px)
+    const calcWidth = state.columnWidths[idx] || Math.min(360, Math.max(150, headerName.length * 9 + 65));
+    th.style.width = `${calcWidth}px`;
+    th.style.minWidth = '140px';
+
     const contentDiv = document.createElement('div');
     contentDiv.className = 'th-content';
 
@@ -1341,6 +1349,18 @@ function renderTableHeader() {
     contentDiv.appendChild(thActions);
     th.appendChild(contentDiv);
 
+    // Draggable column resize handle
+    const resizer = document.createElement('div');
+    resizer.className = 'th-resizer';
+    resizer.title = 'Drag to resize column, double-click to auto-fit';
+    resizer.addEventListener('click', (e) => e.stopPropagation());
+    resizer.addEventListener('mousedown', (e) => initColumnResize(e, idx, th));
+    resizer.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      autoFitColumnWidth(idx, headerName, th);
+    });
+    th.appendChild(resizer);
+
     th.addEventListener('click', () => handleHeaderSortClick(idx));
     trTitle.appendChild(th);
   });
@@ -1364,8 +1384,12 @@ function renderTableHeader() {
   state.allHeaders.forEach((headerName, idx) => {
     if (!state.visibleColumns.has(idx)) return;
 
+    const calcWidth = state.columnWidths[idx] || Math.min(360, Math.max(150, headerName.length * 9 + 65));
     const td = document.createElement('th');
     td.className = 'filter-cell';
+    td.id = `filter-col-${idx}`;
+    td.style.width = `${calcWidth}px`;
+    td.style.minWidth = '140px';
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -1397,6 +1421,48 @@ function renderTableHeader() {
   });
 
   elements.tableHead.appendChild(trFilter);
+}
+
+function initColumnResize(e, colIdx, thEl) {
+  e.stopPropagation();
+  e.preventDefault();
+
+  const startX = e.clientX;
+  const startWidth = thEl.offsetWidth;
+  const resizer = e.target;
+  resizer.classList.add('is-resizing');
+
+  function onMouseMove(moveEvent) {
+    const delta = moveEvent.clientX - startX;
+    const newWidth = Math.max(100, startWidth + delta);
+    thEl.style.width = `${newWidth}px`;
+    state.columnWidths[colIdx] = newWidth;
+
+    const filterCell = document.getElementById(`filter-col-${colIdx}`);
+    if (filterCell) {
+      filterCell.style.width = `${newWidth}px`;
+    }
+  }
+
+  function onMouseUp() {
+    resizer.classList.remove('is-resizing');
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+function autoFitColumnWidth(colIdx, headerName, thEl) {
+  const approxWidth = Math.min(400, Math.max(150, headerName.length * 10 + 75));
+  thEl.style.width = `${approxWidth}px`;
+  state.columnWidths[colIdx] = approxWidth;
+
+  const filterCell = document.getElementById(`filter-col-${colIdx}`);
+  if (filterCell) {
+    filterCell.style.width = `${approxWidth}px`;
+  }
 }
 
 function handleHeaderSortClick(colIdx) {
