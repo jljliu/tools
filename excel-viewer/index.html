@@ -257,6 +257,12 @@
             </tbody>
           </table>
 
+          <!-- Infinite Scroll Status Indicator -->
+          <div class="infinite-scroll-status hidden" id="infinite-scroll-status">
+            <div class="infinite-spinner" id="infinite-spinner"></div>
+            <span id="infinite-status-text">Loading more rows...</span>
+          </div>
+
           <!-- Empty filter state -->
           <div class="no-results hidden" id="no-results">
             <div class="no-results-icon">
@@ -288,12 +294,18 @@
                 <option value="50">50</option>
                 <option value="100">100</option>
                 <option value="500">500</option>
-                <option value="all">All</option>
+                <option value="all">All (Virtual Scroll)</option>
               </select>
             </div>
 
-            <!-- Page Buttons -->
-            <div class="page-buttons">
+            <!-- Virtual Scroll Mode Badge -->
+            <div class="infinite-badge hidden" id="infinite-badge">
+              <span class="pulse-dot"></span>
+              <span>Virtual Scroll</span>
+            </div>
+
+            <!-- Page Buttons (for fixed page sizes) -->
+            <div class="page-buttons" id="page-buttons">
               <button type="button" class="btn-page" id="first-page-btn" title="First page">«</button>
               <button type="button" class="btn-page" id="prev-page-btn" title="Previous page">‹</button>
               <span class="page-indicator" id="page-indicator">Page 1 of 1</span>
@@ -304,6 +316,85 @@
         </footer>
       </section>
     </main>
+
+    <!-- Excel-like Column Filter Popover -->
+    <div class="filter-popover hidden" id="excel-filter-popover">
+      <div class="popover-header">
+        <span class="popover-title" id="popover-col-title">Filter Column</span>
+        <button type="button" class="btn-popover-close" id="popover-close-btn" title="Close">×</button>
+      </div>
+
+      <!-- Quick Sort Actions -->
+      <div class="popover-sort-section">
+        <button type="button" class="popover-action-btn" id="popover-sort-asc-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+          <span>Sort Ascending</span>
+        </button>
+        <button type="button" class="popover-action-btn" id="popover-sort-desc-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+          <span>Sort Descending</span>
+        </button>
+        <button type="button" class="popover-action-btn" id="popover-clear-col-filter-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span>Clear Filter</span>
+        </button>
+      </div>
+
+      <div class="popover-divider"></div>
+
+      <!-- Search in Values -->
+      <div class="popover-search">
+        <input type="text" id="popover-search-input" placeholder="Search unique values..." autocomplete="off" />
+      </div>
+
+      <!-- Select All Controls -->
+      <div class="popover-selection-controls">
+        <label class="popover-check-item popover-select-all-label">
+          <input type="checkbox" id="popover-select-all-chk" checked />
+          <span class="val-text"><strong>(Select All)</strong></span>
+        </label>
+        <div class="popover-sub-actions">
+          <button type="button" class="btn-text" id="popover-select-all-btn">All</button>
+          <span class="sep">·</span>
+          <button type="button" class="btn-text" id="popover-clear-all-btn">None</button>
+        </div>
+      </div>
+
+      <!-- Truncate Banner for columns with >10,000 distinct values -->
+      <div class="popover-truncate-banner hidden" id="popover-truncate-banner">
+        <span>Showing top 10,000 distinct options</span>
+      </div>
+
+      <!-- Scrollable Unique Values List (Virtualized) -->
+      <div class="popover-values-list" id="popover-values-list">
+        <!-- Dynamically rendered checklist items -->
+      </div>
+
+      <!-- Footer Buttons -->
+      <div class="popover-footer">
+        <button type="button" class="btn btn-secondary btn-sm" id="popover-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="popover-apply-btn">Apply Filter</button>
+      </div>
+    </div>
+
+    <!-- Loading Overlay for Large Spreadsheets -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+      <div class="loading-card">
+        <div class="spinner-ring"></div>
+        <h3 id="loading-title">Processing Spreadsheet</h3>
+        <p id="loading-status">Reading file...</p>
+        <div class="loading-bar-wrap">
+          <div class="loading-bar-indeterminate"></div>
+        </div>
+      </div>
+    </div>
 
     <!-- Toast message overlay -->
     <div class="toast-container" id="toast-container"></div>

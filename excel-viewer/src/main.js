@@ -1,25 +1,62 @@
-import * as XLSX from 'xlsx';
 import { sampleSheetData } from './sample-data.js';
 
-// Application State
+// Application State (Lightweight, Main Thread)
 const state = {
   fileName: '',
-  workbook: null,
   sheetNames: [],
   currentSheet: '',
-  allHeaders: [], // Array of string header titles
-  rawRows: [],    // Array of original row arrays
-  columnTypes: [], // Inferred types per column
-  visibleColumns: new Set(), // Set of column indices
-  sortColumn: null, // Index of column currently sorted
-  sortDirection: 'none', // 'asc' | 'desc' | 'none'
+  allHeaders: [],
+  totalRows: 0,
+  filteredCount: 0,
+  columnTypes: [],
+  visibleColumns: new Set(),
+  sortColumn: null,
+  sortDirection: 'none',
   globalSearch: '',
-  columnFilters: {}, // Map of colIndex -> string query
+  columnFilters: {}, // Inline substring query filters
+  columnValueFilters: {}, // Excel-style unique values checklists: colIdx -> Array of allowed strings
   isFilterRowVisible: true,
   pageSize: 25,
   currentPage: 1,
-  filteredRows: [], // Cached filtered & sorted rows
 };
+
+// Virtual Scrolling Engine (Supports Millions of Rows with Minimal DOM Elements)
+const ROW_HEIGHT = 35;
+const BUFFER_ROWS = 15;
+const CACHE_WINDOW_SIZE = 600; // Sliding cache block on main thread (~150KB memory)
+const MAX_BROWSER_SCROLL_HEIGHT = 15000000; // 15 million px ceiling, safe across all browser engines
+
+const virtualState = {
+  cacheOffset: 0,
+  cacheRows: [],
+  isFetchingWindow: false,
+  lastRequestedOffset: -1,
+  pendingOffset: -1,
+  viewportStartIndex: 0,
+  viewportEndIndex: 0,
+};
+
+// DOM Recycling Pool (Reuses fixed ~45 <tr> elements, zero allocations during scroll)
+const domPool = {
+  topSpacerTr: null,
+  topSpacerTd: null,
+  bottomSpacerTr: null,
+  bottomSpacerTd: null,
+  rowTrs: [],
+  isInitialized: false,
+};
+
+// Excel-style Popover runtime state (Supports 10,000+ unique values with virtual checklist)
+const CHECKLIST_ITEM_HEIGHT = 28;
+const cachedUniqueValues = new Map(); // colIdx -> Array of { value, count }
+let activePopoverColIdx = null;
+let popoverSelectedSet = new Set();
+let popoverCurrentUniqueList = [];
+let popoverFilteredList = [];
+let popoverIsTruncated = false;
+
+// Spawn Web Worker
+const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
 // DOM Elements
 const elements = {
@@ -38,6 +75,7 @@ const elements = {
   uploadView: document.getElementById('upload-view'),
   dropzone: document.getElementById('dropzone'),
   tableView: document.getElementById('table-view'),
+  tableScrollContainer: document.getElementById('table-scroll-container'),
   globalSearchInput: document.getElementById('global-search-input'),
   clearSearchBtn: document.getElementById('clear-search-btn'),
   toggleFilterRowBtn: document.getElementById('toggle-filter-row-btn'),
@@ -59,6 +97,8 @@ const elements = {
   exportCsvBtn: document.getElementById('export-csv-btn'),
   themeToggleBtn: document.getElementById('theme-toggle-btn'),
   pageSizeSelect: document.getElementById('page-size-select'),
+  pageButtons: document.getElementById('page-buttons'),
+  infiniteBadge: document.getElementById('infinite-badge'),
   firstPageBtn: document.getElementById('first-page-btn'),
   prevPageBtn: document.getElementById('prev-page-btn'),
   nextPageBtn: document.getElementById('next-page-btn'),
@@ -66,14 +106,83 @@ const elements = {
   pageIndicator: document.getElementById('page-indicator'),
   pageRecordsSummary: document.getElementById('page-records-summary'),
   toastContainer: document.getElementById('toast-container'),
+  loadingOverlay: document.getElementById('loading-overlay'),
+  loadingTitle: document.getElementById('loading-title'),
+  loadingStatus: document.getElementById('loading-status'),
+  // Excel Popover Elements
+  excelFilterPopover: document.getElementById('excel-filter-popover'),
+  popoverColTitle: document.getElementById('popover-col-title'),
+  popoverCloseBtn: document.getElementById('popover-close-btn'),
+  popoverSortAscBtn: document.getElementById('popover-sort-asc-btn'),
+  popoverSortDescBtn: document.getElementById('popover-sort-desc-btn'),
+  popoverClearColFilterBtn: document.getElementById('popover-clear-col-filter-btn'),
+  popoverSearchInput: document.getElementById('popover-search-input'),
+  popoverSelectAllChk: document.getElementById('popover-select-all-chk'),
+  popoverSelectAllBtn: document.getElementById('popover-select-all-btn'),
+  popoverClearAllBtn: document.getElementById('popover-clear-all-btn'),
+  popoverValuesList: document.getElementById('popover-values-list'),
+  popoverTruncateBanner: document.getElementById('popover-truncate-banner'),
+  popoverCancelBtn: document.getElementById('popover-cancel-btn'),
+  popoverApplyBtn: document.getElementById('popover-apply-btn'),
 };
 
 // ==========================================================================
-// Initialization & Event Listeners
+// Initialization & Worker Listeners
 // ==========================================================================
 function init() {
   bindEvents();
   initTheme();
+  setupWorkerListeners();
+}
+
+function setupWorkerListeners() {
+  worker.onmessage = (e) => {
+    const { type, message, ...data } = e.data;
+
+    switch (type) {
+      case 'STATUS':
+        updateLoadingStatus(message);
+        break;
+
+      case 'PARSE_SUCCESS':
+        handleParseSuccess(data);
+        break;
+
+      case 'SHEET_SWITCHED':
+        handleSheetSwitched(data);
+        break;
+
+      case 'QUERY_RESULT':
+        handleQueryResult(data);
+        break;
+
+      case 'WINDOW_RESULT':
+        handleWindowResult(data);
+        break;
+
+      case 'UNIQUE_VALUES_RESULT':
+        handleUniqueValuesResult(data);
+        break;
+
+      case 'EXPORT_CSV_RESULT':
+        handleExportCsvResult(data);
+        break;
+
+      case 'ERROR':
+        hideLoading();
+        showToast(message || 'An error occurred', 'error');
+        break;
+
+      default:
+        console.warn('Unhandled worker response:', type);
+    }
+  };
+
+  worker.onerror = (err) => {
+    console.error('Worker thread error:', err);
+    hideLoading();
+    showToast('Spreadsheet processor encountered an issue. The file may exceed memory limits.', 'error');
+  };
 }
 
 function bindEvents() {
@@ -100,17 +209,45 @@ function bindEvents() {
     }
   });
 
-  // Sheet switcher
-  elements.sheetSelect.addEventListener('change', (e) => {
-    switchSheet(e.target.value);
+  // Virtual scroll listener using requestAnimationFrame for 60fps rendering
+  let rafScrollId = null;
+  elements.tableScrollContainer.addEventListener('scroll', () => {
+    if (state.pageSize !== Infinity) return;
+    if (rafScrollId) cancelAnimationFrame(rafScrollId);
+    rafScrollId = requestAnimationFrame(() => {
+      renderVirtualWindow();
+    });
+  }, { passive: true });
+
+  // Delegated double-click cell copy on tableBody (zero per-cell listener overhead)
+  elements.tableBody.addEventListener('dblclick', (e) => {
+    const td = e.target.closest('.td-cell');
+    if (td && !td.classList.contains('td-empty') && !td.classList.contains('td-row-index')) {
+      const rawVal = td.getAttribute('data-raw') || td.textContent;
+      copyCell(rawVal);
+    }
   });
 
-  // Global search
+  // Sheet switcher
+  elements.sheetSelect.addEventListener('change', (e) => {
+    const sheetName = e.target.value;
+    showLoading('Switching Sheet', `Loading "${sheetName}"...`);
+    closeExcelFilterPopover();
+    cachedUniqueValues.clear();
+    state.columnValueFilters = {};
+    worker.postMessage({ type: 'SWITCH_SHEET', payload: { sheetName } });
+  });
+
+  // Global search with debounce
+  let searchTimer;
   elements.globalSearchInput.addEventListener('input', (e) => {
     state.globalSearch = e.target.value.trim();
     elements.clearSearchBtn.classList.toggle('hidden', !state.globalSearch);
-    state.currentPage = 1;
-    applyFiltersAndSort();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.currentPage = 1;
+      queryWorker();
+    }, 120);
   });
 
   elements.clearSearchBtn.addEventListener('click', () => {
@@ -118,10 +255,10 @@ function bindEvents() {
     state.globalSearch = '';
     elements.clearSearchBtn.classList.add('hidden');
     state.currentPage = 1;
-    applyFiltersAndSort();
+    queryWorker();
   });
 
-  // Toggle filter row
+  // Toggle inline filter row
   elements.toggleFilterRowBtn.addEventListener('click', () => {
     state.isFilterRowVisible = !state.isFilterRowVisible;
     elements.toggleFilterRowBtn.classList.toggle('active', state.isFilterRowVisible);
@@ -135,9 +272,10 @@ function bindEvents() {
   elements.resetAllFiltersBtn.addEventListener('click', resetAllFilters);
   elements.emptyClearBtn.addEventListener('click', resetAllFilters);
 
-  // Column visibility panel toggle
+  // Column visibility panel
   elements.columnsBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    closeExcelFilterPopover();
     const isHidden = elements.columnsPanel.classList.toggle('hidden');
     if (!isHidden) {
       elements.columnSearchInput.value = '';
@@ -148,6 +286,16 @@ function bindEvents() {
 
   document.addEventListener('click', (e) => {
     if (!elements.columnsPanel.contains(e.target) && !elements.columnsBtn.contains(e.target)) {
+      elements.columnsPanel.classList.add('hidden');
+    }
+    if (!elements.excelFilterPopover.contains(e.target) && !e.target.closest('.th-filter-btn')) {
+      closeExcelFilterPopover();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeExcelFilterPopover();
       elements.columnsPanel.classList.add('hidden');
     }
   });
@@ -163,21 +311,30 @@ function bindEvents() {
 
   elements.hideAllColsBtn.addEventListener('click', () => {
     state.visibleColumns.clear();
-    // Keep at least column 0 visible
     state.visibleColumns.add(0);
     updateColumnsVisibility();
   });
 
   // Export CSV
-  elements.exportCsvBtn.addEventListener('click', exportVisibleToCsv);
+  elements.exportCsvBtn.addEventListener('click', () => {
+    showLoading('Exporting CSV', 'Formatting filtered rows...');
+    worker.postMessage({
+      type: 'EXPORT_CSV',
+      payload: {
+        visibleCols: Array.from(state.visibleColumns),
+        baseFileName: (state.fileName || 'export').replace(/\.[^/.]+$/, '')
+      }
+    });
+  });
 
-  // Pagination controls
+  // Pagination / Page Size controls
   elements.pageSizeSelect.addEventListener('change', (e) => {
     const val = e.target.value;
     state.pageSize = val === 'all' ? Infinity : parseInt(val, 10);
     state.currentPage = 1;
-    renderTableBody();
-    updatePaginationUI();
+    domPool.isInitialized = false;
+    elements.tableScrollContainer.scrollTop = 0;
+    queryWorker(1);
   });
 
   elements.firstPageBtn.addEventListener('click', () => goToPage(1));
@@ -190,6 +347,570 @@ function bindEvents() {
 
   // Theme toggle
   elements.themeToggleBtn.addEventListener('click', toggleTheme);
+
+  // Excel Popover Events
+  bindPopoverEvents();
+}
+
+function bindPopoverEvents() {
+  elements.popoverCloseBtn.addEventListener('click', closeExcelFilterPopover);
+  elements.popoverCancelBtn.addEventListener('click', closeExcelFilterPopover);
+
+  // Virtual scroll inside unique values checklist
+  elements.popoverValuesList.addEventListener('scroll', () => {
+    renderPopoverChecklistVirtual();
+  }, { passive: true });
+
+  // Search inside unique values checklist
+  elements.popoverSearchInput.addEventListener('input', (e) => {
+    filterAndRenderPopoverList(e.target.value);
+  });
+
+  // Select all checkbox
+  elements.popoverSelectAllChk.addEventListener('change', (e) => {
+    const checked = e.target.checked;
+    popoverFilteredList.forEach((item) => {
+      if (checked) {
+        popoverSelectedSet.add(item.value);
+      } else {
+        popoverSelectedSet.delete(item.value);
+      }
+    });
+    renderPopoverChecklistVirtual();
+  });
+
+  // Quick All / None buttons
+  elements.popoverSelectAllBtn.addEventListener('click', () => {
+    popoverFilteredList.forEach((item) => popoverSelectedSet.add(item.value));
+    renderPopoverChecklistVirtual();
+  });
+
+  elements.popoverClearAllBtn.addEventListener('click', () => {
+    popoverFilteredList.forEach((item) => popoverSelectedSet.delete(item.value));
+    renderPopoverChecklistVirtual();
+  });
+
+  // Popover Sort buttons
+  elements.popoverSortAscBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+    state.sortColumn = activePopoverColIdx;
+    state.sortDirection = 'asc';
+    closeExcelFilterPopover();
+    queryWorker(1);
+  });
+
+  elements.popoverSortDescBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+    state.sortColumn = activePopoverColIdx;
+    state.sortDirection = 'desc';
+    closeExcelFilterPopover();
+    queryWorker(1);
+  });
+
+  // Clear this column's value filter
+  elements.popoverClearColFilterBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+    delete state.columnValueFilters[activePopoverColIdx];
+    closeExcelFilterPopover();
+    renderTableHeader();
+    queryWorker(1);
+  });
+
+  // Apply button
+  elements.popoverApplyBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+
+    if (popoverSelectedSet.size >= popoverCurrentUniqueList.length) {
+      delete state.columnValueFilters[activePopoverColIdx];
+    } else {
+      state.columnValueFilters[activePopoverColIdx] = Array.from(popoverSelectedSet);
+    }
+
+    closeExcelFilterPopover();
+    renderTableHeader();
+    queryWorker(1);
+  });
+}
+
+// ==========================================================================
+// Virtual Scrolling Engine (DOM Recycling Pool: Supports Millions of Rows)
+// ==========================================================================
+function getVirtualMetrics() {
+  const totalRows = state.filteredCount;
+  const actualTotalHeight = totalRows * ROW_HEIGHT;
+  const scrollHeight = Math.min(actualTotalHeight, MAX_BROWSER_SCROLL_HEIGHT);
+
+  const scrollTop = elements.tableScrollContainer.scrollTop || 0;
+  const viewportHeight = elements.tableScrollContainer.clientHeight || 600;
+
+  const maxContainerScroll = Math.max(1, scrollHeight - viewportHeight);
+  const maxVirtualScroll = Math.max(0, actualTotalHeight - viewportHeight);
+
+  // Proportional scroll ratio mapping 0.0 to 1.0 (reaches very last row accurately)
+  const scrollRatio = Math.min(1, Math.max(0, scrollTop / maxContainerScroll));
+  const virtualScrollTop = scrollRatio * maxVirtualScroll;
+
+  const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
+  let startIndex = Math.max(0, Math.floor(virtualScrollTop / ROW_HEIGHT) - BUFFER_ROWS);
+  let endIndex = Math.min(totalRows, startIndex + visibleCount + 2 * BUFFER_ROWS);
+
+  if (endIndex >= totalRows) {
+    endIndex = totalRows;
+    startIndex = Math.max(0, endIndex - (visibleCount + 2 * BUFFER_ROWS));
+  }
+
+  const renderedCount = Math.max(0, endIndex - startIndex);
+  const heightScale = actualTotalHeight > scrollHeight ? (actualTotalHeight / scrollHeight) : 1;
+  const topPadding = Math.max(0, Math.floor((startIndex * ROW_HEIGHT) / heightScale));
+  const renderedHeight = Math.floor((renderedCount * ROW_HEIGHT) / heightScale);
+  const bottomPadding = Math.max(0, scrollHeight - topPadding - renderedHeight);
+
+  return {
+    totalRows,
+    startIndex,
+    endIndex,
+    renderedCount,
+    topPadding,
+    bottomPadding,
+    heightScale
+  };
+}
+
+function initVirtualDomPool() {
+  elements.tableBody.innerHTML = '';
+  domPool.rowTrs = [];
+
+  const colCount = state.visibleColumns.size + 1; // +1 for index (#) column
+
+  // Top Virtual Spacer
+  domPool.topSpacerTr = document.createElement('tr');
+  domPool.topSpacerTr.className = 'virtual-spacer-tr';
+  domPool.topSpacerTd = document.createElement('td');
+  domPool.topSpacerTd.colSpan = colCount;
+  domPool.topSpacerTd.style.cssText = 'height: 0px; padding: 0; border: none; background: transparent;';
+  domPool.topSpacerTr.appendChild(domPool.topSpacerTd);
+  elements.tableBody.appendChild(domPool.topSpacerTr);
+
+  // Bottom Virtual Spacer
+  domPool.bottomSpacerTr = document.createElement('tr');
+  domPool.bottomSpacerTr.className = 'virtual-spacer-tr';
+  domPool.bottomSpacerTd = document.createElement('td');
+  domPool.bottomSpacerTd.colSpan = colCount;
+  domPool.bottomSpacerTd.style.cssText = 'height: 0px; padding: 0; border: none; background: transparent;';
+  domPool.bottomSpacerTr.appendChild(domPool.bottomSpacerTd);
+  elements.tableBody.appendChild(domPool.bottomSpacerTr);
+
+  domPool.isInitialized = true;
+}
+
+function renderVirtualWindow() {
+  if (state.pageSize !== Infinity) return;
+
+  const metrics = getVirtualMetrics();
+  virtualState.viewportStartIndex = metrics.startIndex;
+  virtualState.viewportEndIndex = metrics.endIndex;
+
+  const cacheStart = virtualState.cacheOffset;
+  const cacheEnd = cacheStart + virtualState.cacheRows.length;
+  const hasFullCache = metrics.startIndex >= cacheStart && metrics.endIndex <= cacheEnd;
+
+  // Background pre-fetch when approaching window boundary
+  const edgeThreshold = 100;
+  const nearEdge = (metrics.startIndex - cacheStart < edgeThreshold) || (cacheEnd - metrics.endIndex < edgeThreshold);
+
+  if ((!hasFullCache || nearEdge) && metrics.totalRows > 0) {
+    const targetOffset = Math.max(0, metrics.startIndex - Math.floor(CACHE_WINDOW_SIZE / 3));
+
+    if (virtualState.isFetchingWindow) {
+      virtualState.pendingOffset = targetOffset;
+    } else if (targetOffset !== virtualState.lastRequestedOffset) {
+      virtualState.isFetchingWindow = true;
+      virtualState.lastRequestedOffset = targetOffset;
+      worker.postMessage({
+        type: 'QUERY_WINDOW',
+        payload: { offset: targetOffset, limit: CACHE_WINDOW_SIZE }
+      });
+    }
+  }
+
+  renderVirtualDOM(metrics);
+  updatePaginationUI();
+}
+
+function renderVirtualDOM(metrics) {
+  const { startIndex, endIndex, topPadding, bottomPadding, totalRows, renderedCount } = metrics;
+  const colCount = state.visibleColumns.size + 1;
+
+  if (totalRows === 0) {
+    elements.noResults.classList.remove('hidden');
+    if (domPool.isInitialized) {
+      domPool.topSpacerTr.style.display = 'none';
+      domPool.bottomSpacerTr.style.display = 'none';
+      domPool.rowTrs.forEach((tr) => { tr.style.display = 'none'; });
+    }
+    return;
+  }
+  elements.noResults.classList.add('hidden');
+
+  if (!domPool.isInitialized) {
+    initVirtualDomPool();
+  }
+
+  // Update Spacer Rows
+  domPool.topSpacerTr.style.display = topPadding > 0 ? '' : 'none';
+  domPool.topSpacerTr.style.height = `${topPadding}px`;
+  domPool.topSpacerTd.style.height = `${topPadding}px`;
+  domPool.topSpacerTd.colSpan = colCount;
+
+  domPool.bottomSpacerTr.style.display = bottomPadding > 0 ? '' : 'none';
+  domPool.bottomSpacerTr.style.height = `${bottomPadding}px`;
+  domPool.bottomSpacerTd.style.height = `${bottomPadding}px`;
+  domPool.bottomSpacerTd.colSpan = colCount;
+
+  const cacheStart = virtualState.cacheOffset;
+  const cacheLen = virtualState.cacheRows.length;
+
+  // Recycle / populate DOM rows in pool
+  for (let i = 0; i < renderedCount; i++) {
+    const rowIdx = startIndex + i;
+    const cacheRelIdx = rowIdx - cacheStart;
+
+    let tr = domPool.rowTrs[i];
+    if (!tr) {
+      tr = document.createElement('tr');
+      tr.className = 'tb-row';
+
+      // Fixed row index cell (#)
+      const tdIdx = document.createElement('td');
+      tdIdx.className = 'td-cell td-row-index';
+      tr.appendChild(tdIdx);
+
+      // Value cells
+      for (let c = 0; c < state.visibleColumns.size; c++) {
+        const td = document.createElement('td');
+        td.className = 'td-cell';
+        tr.appendChild(td);
+      }
+
+      elements.tableBody.insertBefore(tr, domPool.bottomSpacerTr);
+      domPool.rowTrs.push(tr);
+    }
+
+    tr.style.display = '';
+    tr.children[0].textContent = rowIdx + 1;
+
+    // Populated from sliding cache
+    if (cacheRelIdx >= 0 && cacheRelIdx < cacheLen) {
+      const rowRecord = virtualState.cacheRows[cacheRelIdx];
+      tr.classList.remove('tb-skeleton-row');
+
+      let cellDomIdx = 1;
+      state.allHeaders.forEach((_, colIdx) => {
+        if (!state.visibleColumns.has(colIdx)) return;
+        const td = tr.children[cellDomIdx++];
+        if (!td) return;
+
+        const cellVal = rowRecord.values[colIdx];
+        const colType = state.columnTypes[colIdx];
+        updateCellDomContent(td, cellVal, colType);
+      });
+    } else {
+      // Skeleton placeholder while window slice is streaming
+      tr.classList.add('tb-skeleton-row');
+      for (let c = 1; c <= state.visibleColumns.size; c++) {
+        const td = tr.children[c];
+        if (td) {
+          td.className = 'td-cell td-empty';
+          td.textContent = '...';
+          td.removeAttribute('data-raw');
+          td.removeAttribute('title');
+        }
+      }
+    }
+  }
+
+  // Hide excess pooled rows
+  for (let i = renderedCount; i < domPool.rowTrs.length; i++) {
+    domPool.rowTrs[i].style.display = 'none';
+  }
+}
+
+function updateCellDomContent(td, val, colType) {
+  if (val === '' || val === null || val === undefined) {
+    td.className = 'td-cell td-empty';
+    td.textContent = '—';
+    td.removeAttribute('data-raw');
+    td.removeAttribute('title');
+    return;
+  }
+
+  const str = String(val);
+  td.setAttribute('data-raw', str);
+
+  // Status badges
+  const lower = str.toLowerCase().trim();
+  if (['delivered', 'completed', 'active', 'success', 'paid', 'yes', 'true'].includes(lower)) {
+    td.className = 'td-cell';
+    td.innerHTML = `<span class="status-pill status-success">${escapeHtml(str)}</span>`;
+    td.title = str;
+    return;
+  }
+  if (['processing', 'pending', 'in progress', 'warning'].includes(lower)) {
+    td.className = 'td-cell';
+    td.innerHTML = `<span class="status-pill status-warning">${escapeHtml(str)}</span>`;
+    td.title = str;
+    return;
+  }
+  if (['cancelled', 'failed', 'inactive', 'rejected', 'error', 'no', 'false'].includes(lower)) {
+    td.className = 'td-cell';
+    td.innerHTML = `<span class="status-pill status-danger">${escapeHtml(str)}</span>`;
+    td.title = str;
+    return;
+  }
+  if (['shipped', 'open', 'info'].includes(lower)) {
+    td.className = 'td-cell';
+    td.innerHTML = `<span class="status-pill status-info">${escapeHtml(str)}</span>`;
+    td.title = str;
+    return;
+  }
+
+  // URL links
+  if (/^https?:\/\//i.test(str)) {
+    td.className = 'td-cell';
+    td.innerHTML = `<a href="${escapeHtml(str)}" target="_blank" rel="noopener noreferrer" class="td-link">${escapeHtml(str)}</a>`;
+    td.title = str;
+    return;
+  }
+
+  // Numbers
+  if (colType === 'numeric' || (!isNaN(str) && !isNaN(parseFloat(str)) && !str.includes('-') && str.length < 15)) {
+    td.className = 'td-cell td-number';
+    td.textContent = str;
+    td.title = str;
+    return;
+  }
+
+  // Default text
+  td.className = 'td-cell';
+  td.textContent = str;
+  td.title = str;
+}
+
+function handleWindowResult(data) {
+  virtualState.cacheOffset = data.offset;
+  virtualState.cacheRows = data.rows;
+  virtualState.isFetchingWindow = false;
+
+  // Process any pending offset from rapid scrolling
+  if (virtualState.pendingOffset >= 0 && virtualState.pendingOffset !== virtualState.cacheOffset) {
+    const nextOffset = virtualState.pendingOffset;
+    virtualState.pendingOffset = -1;
+    virtualState.isFetchingWindow = true;
+    worker.postMessage({
+      type: 'QUERY_WINDOW',
+      payload: { offset: nextOffset, limit: CACHE_WINDOW_SIZE }
+    });
+  }
+
+  if (state.pageSize === Infinity) {
+    renderVirtualWindow();
+  }
+}
+
+// ==========================================================================
+// Excel Popover Logic (Virtualized Checklist: Only ~15 Items Rendered)
+// ==========================================================================
+function openExcelFilterPopover(colIdx, triggerBtn) {
+  activePopoverColIdx = colIdx;
+  elements.columnsPanel.classList.add('hidden');
+
+  const colName = state.allHeaders[colIdx] || `Column ${colIdx + 1}`;
+  elements.popoverColTitle.textContent = `Filter: ${colName}`;
+  elements.popoverSearchInput.value = '';
+
+  const rect = triggerBtn.getBoundingClientRect();
+  let left = rect.left;
+  if (left + 300 > window.innerWidth) {
+    left = window.innerWidth - 305;
+  }
+  if (left < 10) left = 10;
+
+  let top = rect.bottom + 6;
+  if (top + 460 > window.innerHeight) {
+    top = Math.max(10, rect.top - 460);
+  }
+
+  elements.excelFilterPopover.style.top = `${top}px`;
+  elements.excelFilterPopover.style.left = `${left}px`;
+  elements.excelFilterPopover.classList.remove('hidden');
+
+  const hasActiveFilter = Boolean(state.columnValueFilters[colIdx]);
+  elements.popoverClearColFilterBtn.style.opacity = hasActiveFilter ? '1' : '0.4';
+  elements.popoverClearColFilterBtn.style.pointerEvents = hasActiveFilter ? 'auto' : 'none';
+
+  if (cachedUniqueValues.has(colIdx)) {
+    popoverCurrentUniqueList = cachedUniqueValues.get(colIdx);
+    initPopoverSelection(colIdx);
+    updatePopoverTruncateBanner(popoverIsTruncated);
+    filterAndRenderPopoverList();
+  } else {
+    elements.popoverTruncateBanner.classList.add('hidden');
+    elements.popoverValuesList.innerHTML = `
+      <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.8rem;">
+        <div class="infinite-spinner" style="margin: 0 auto 8px auto;"></div>
+        Extracting unique options...
+      </div>`;
+    worker.postMessage({
+      type: 'GET_UNIQUE_VALUES',
+      payload: { colIdx }
+    });
+  }
+}
+
+function handleUniqueValuesResult({ colIdx, uniqueValues, isTruncated }) {
+  cachedUniqueValues.set(colIdx, uniqueValues);
+  popoverIsTruncated = Boolean(isTruncated);
+
+  if (activePopoverColIdx === colIdx) {
+    popoverCurrentUniqueList = uniqueValues;
+    initPopoverSelection(colIdx);
+    updatePopoverTruncateBanner(popoverIsTruncated);
+    filterAndRenderPopoverList();
+  }
+}
+
+function updatePopoverTruncateBanner(isTruncated) {
+  if (isTruncated) {
+    elements.popoverTruncateBanner.classList.remove('hidden');
+  } else {
+    elements.popoverTruncateBanner.classList.add('hidden');
+  }
+}
+
+function initPopoverSelection(colIdx) {
+  if (state.columnValueFilters[colIdx]) {
+    popoverSelectedSet = new Set(state.columnValueFilters[colIdx]);
+  } else {
+    popoverSelectedSet = new Set(popoverCurrentUniqueList.map((item) => item.value));
+  }
+}
+
+function filterAndRenderPopoverList(searchQuery = '') {
+  const searchLower = searchQuery.trim().toLowerCase();
+  popoverFilteredList = popoverCurrentUniqueList.filter((item) => {
+    if (!searchLower) return true;
+    const str = item.value === '' ? '(blanks)' : String(item.value).toLowerCase();
+    return str.includes(searchLower);
+  });
+
+  elements.popoverValuesList.scrollTop = 0;
+  renderPopoverChecklistVirtual();
+}
+
+function renderPopoverChecklistVirtual() {
+  const scrollTop = elements.popoverValuesList.scrollTop || 0;
+  const viewportHeight = 200;
+  const totalItems = popoverFilteredList.length;
+
+  if (totalItems === 0) {
+    elements.popoverValuesList.innerHTML = `
+      <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 0.8rem;">
+        No matching values
+      </div>`;
+    elements.popoverSelectAllChk.checked = false;
+    elements.popoverSelectAllChk.indeterminate = false;
+    return;
+  }
+
+  updateSelectAllChkState(popoverFilteredList);
+
+  const startIndex = Math.max(0, Math.floor(scrollTop / CHECKLIST_ITEM_HEIGHT) - 2);
+  const visibleCount = Math.ceil(viewportHeight / CHECKLIST_ITEM_HEIGHT) + 4;
+  const endIndex = Math.min(totalItems, startIndex + visibleCount);
+  const renderedCount = endIndex - startIndex;
+
+  const topPadding = startIndex * CHECKLIST_ITEM_HEIGHT;
+  const bottomPadding = Math.max(0, (totalItems - endIndex) * CHECKLIST_ITEM_HEIGHT);
+
+  elements.popoverValuesList.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+
+  // Top Spacer
+  if (topPadding > 0) {
+    const spacerTop = document.createElement('div');
+    spacerTop.className = 'popover-spacer';
+    spacerTop.style.height = `${topPadding}px`;
+    fragment.appendChild(spacerTop);
+  }
+
+  // Render ONLY visible ~12 items
+  for (let i = 0; i < renderedCount; i++) {
+    const item = popoverFilteredList[startIndex + i];
+    const label = document.createElement('label');
+    label.className = 'popover-check-item';
+    label.style.height = `${CHECKLIST_ITEM_HEIGHT}px`;
+
+    const left = document.createElement('div');
+    left.className = 'val-item-left';
+
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = popoverSelectedSet.has(item.value);
+
+    chk.addEventListener('change', () => {
+      if (chk.checked) {
+        popoverSelectedSet.add(item.value);
+      } else {
+        popoverSelectedSet.delete(item.value);
+      }
+      updateSelectAllChkState(popoverFilteredList);
+    });
+
+    const spanText = document.createElement('span');
+    spanText.className = 'val-text' + (item.value === '' ? ' val-blank' : '');
+    spanText.textContent = item.value === '' ? '(Blanks)' : item.value;
+    spanText.title = item.value === '' ? '(Blanks)' : item.value;
+
+    left.appendChild(chk);
+    left.appendChild(spanText);
+
+    const spanCount = document.createElement('span');
+    spanCount.className = 'val-count';
+    spanCount.textContent = item.count.toLocaleString();
+
+    label.appendChild(left);
+    label.appendChild(spanCount);
+    fragment.appendChild(label);
+  }
+
+  // Bottom Spacer
+  if (bottomPadding > 0) {
+    const spacerBottom = document.createElement('div');
+    spacerBottom.className = 'popover-spacer';
+    spacerBottom.style.height = `${bottomPadding}px`;
+    fragment.appendChild(spacerBottom);
+  }
+
+  elements.popoverValuesList.appendChild(fragment);
+}
+
+function updateSelectAllChkState(filteredItems) {
+  let allChecked = true;
+  let anyChecked = false;
+
+  filteredItems.forEach((item) => {
+    const isChecked = popoverSelectedSet.has(item.value);
+    if (isChecked) anyChecked = true;
+    else allChecked = false;
+  });
+
+  elements.popoverSelectAllChk.checked = allChecked;
+  elements.popoverSelectAllChk.indeterminate = !allChecked && anyChecked;
+}
+
+function closeExcelFilterPopover() {
+  activePopoverColIdx = null;
+  elements.excelFilterPopover.classList.add('hidden');
 }
 
 // ==========================================================================
@@ -221,55 +942,158 @@ function setTheme(theme) {
 }
 
 // ==========================================================================
-// File Ingestion & Parsing
+// Loading Overlay
+// ==========================================================================
+function showLoading(title, status) {
+  elements.loadingTitle.textContent = title;
+  elements.loadingStatus.textContent = status;
+  elements.loadingOverlay.classList.remove('hidden');
+}
+
+function updateLoadingStatus(status) {
+  elements.loadingStatus.textContent = status;
+}
+
+function hideLoading() {
+  elements.loadingOverlay.classList.add('hidden');
+}
+
+// ==========================================================================
+// File Ingestion via Web Worker
 // ==========================================================================
 function handleFileInput(e) {
   const file = e.target.files[0];
   if (file) {
     handleFile(file);
   }
-  // Reset input so same file can be reloaded if desired
   e.target.value = '';
 }
 
 async function handleFile(file) {
-  showToast(`Parsing "${file.name}"...`, 'info');
+  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+  showLoading('Loading Spreadsheet', `Reading ${file.name} (${sizeMB} MB)...`);
+  closeExcelFilterPopover();
+  cachedUniqueValues.clear();
+  state.columnValueFilters = {};
+
   try {
     const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, {
-      type: 'array',
-      cellDates: true,
-      raw: false,
-      dateNF: 'yyyy-mm-dd'
-    });
-
-    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-      throw new Error('No sheets found in this workbook.');
-    }
-
-    state.fileName = file.name;
-    state.workbook = workbook;
-    state.sheetNames = workbook.SheetNames;
-    state.currentSheet = workbook.SheetNames[0];
-
-    updateSheetSelector();
-    loadSheetData(state.currentSheet);
-    showToast(`Loaded "${file.name}" successfully!`, 'success');
+    worker.postMessage({
+      type: 'PARSE_FILE',
+      payload: { buffer, fileName: file.name }
+    }, [buffer]);
   } catch (err) {
-    console.error('File parsing error:', err);
-    showToast(`Error parsing file: ${err.message || 'Invalid format'}`, 'error');
+    console.error('File read error:', err);
+    hideLoading();
+    showToast(`Error reading file: ${err.message}`, 'error');
   }
 }
 
 function loadSampleData() {
-  state.fileName = 'Sample_Global_Sales_Q3.xlsx';
-  state.workbook = null;
-  state.sheetNames = [sampleSheetData.sheetName];
-  state.currentSheet = sampleSheetData.sheetName;
+  showLoading('Loading Demo Data', 'Preparing sample dataset...');
+  closeExcelFilterPopover();
+  cachedUniqueValues.clear();
+  state.columnValueFilters = {};
+
+  worker.postMessage({
+    type: 'LOAD_SAMPLE',
+    payload: { sampleSheetData }
+  });
+}
+
+function handleParseSuccess(data) {
+  hideLoading();
+
+  state.fileName = data.fileName;
+  state.sheetNames = data.sheetNames;
+  state.currentSheet = data.currentSheet;
+  state.allHeaders = data.headers;
+  state.totalRows = data.totalRows;
+  state.filteredCount = data.totalRows;
+  state.columnTypes = data.columnTypes;
+
+  state.visibleColumns = new Set(data.headers.map((_, idx) => idx));
+  state.sortColumn = null;
+  state.sortDirection = 'none';
+  state.globalSearch = '';
+  state.columnFilters = {};
+  state.columnValueFilters = {};
+  state.currentPage = 1;
+
+  elements.globalSearchInput.value = '';
+  elements.clearSearchBtn.classList.add('hidden');
 
   updateSheetSelector();
-  processRawHeadersAndRows(sampleSheetData.headers, sampleSheetData.rows);
-  showToast('Loaded sample dataset!', 'success');
+
+  elements.activeFilename.textContent = state.fileName;
+  elements.uploadBtnText.textContent = 'Change File';
+  elements.rowCountBadge.textContent = `${state.totalRows.toLocaleString()} rows`;
+  elements.colCountBadge.textContent = `${state.allHeaders.length} cols`;
+
+  elements.columnsBtn.disabled = false;
+  elements.exportCsvBtn.disabled = false;
+  elements.fileMeta.classList.remove('hidden');
+
+  elements.uploadView.classList.add('hidden');
+  elements.tableView.classList.remove('hidden');
+
+  domPool.isInitialized = false;
+  renderTableHeader();
+  renderColumnsList();
+  updateColumnsVisibilityBadge();
+  updateFilterChips();
+
+  handleQueryResult({
+    page: 1,
+    pageSize: state.pageSize,
+    offset: 0,
+    totalRows: state.totalRows,
+    filteredCount: state.totalRows,
+    rows: data.initialPageRows
+  });
+
+  showToast(`Loaded "${state.fileName}" (${state.totalRows.toLocaleString()} rows)`, 'success');
+}
+
+function handleSheetSwitched(data) {
+  hideLoading();
+
+  state.currentSheet = data.currentSheet;
+  state.allHeaders = data.headers;
+  state.totalRows = data.totalRows;
+  state.filteredCount = data.totalRows;
+  state.columnTypes = data.columnTypes;
+
+  state.visibleColumns = new Set(data.headers.map((_, idx) => idx));
+  state.sortColumn = null;
+  state.sortDirection = 'none';
+  state.globalSearch = '';
+  state.columnFilters = {};
+  state.columnValueFilters = {};
+  state.currentPage = 1;
+
+  elements.globalSearchInput.value = '';
+  elements.clearSearchBtn.classList.add('hidden');
+
+  elements.rowCountBadge.textContent = `${state.totalRows.toLocaleString()} rows`;
+  elements.colCountBadge.textContent = `${state.allHeaders.length} cols`;
+
+  domPool.isInitialized = false;
+  renderTableHeader();
+  renderColumnsList();
+  updateColumnsVisibilityBadge();
+  updateFilterChips();
+
+  handleQueryResult({
+    page: 1,
+    pageSize: state.pageSize,
+    offset: 0,
+    totalRows: state.totalRows,
+    filteredCount: state.totalRows,
+    rows: data.pageRows
+  });
+
+  showToast(`Switched to sheet "${state.currentSheet}"`, 'info');
 }
 
 function updateSheetSelector() {
@@ -288,222 +1112,61 @@ function updateSheetSelector() {
   }
 }
 
-function switchSheet(sheetName) {
-  if (!state.workbook) return;
-  state.currentSheet = sheetName;
-  loadSheetData(sheetName);
-  showToast(`Switched to sheet "${sheetName}"`, 'info');
-}
-
-function loadSheetData(sheetName) {
-  const worksheet = state.workbook.Sheets[sheetName];
-  if (!worksheet) {
-    showToast(`Worksheet "${sheetName}" not found`, 'error');
-    return;
-  }
-
-  // Convert worksheet to 2D array of rows
-  const rawData = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    defval: '',
-    blankrows: false
-  });
-
-  if (rawData.length === 0) {
-    showToast('The selected sheet is empty', 'error');
-    return;
-  }
-
-  // Row 0 is header; rows 1..N are data
-  const headers = rawData[0];
-  const rows = rawData.slice(1);
-
-  processRawHeadersAndRows(headers, rows);
-}
-
-function processRawHeadersAndRows(rawHeaders, rawRows) {
-  // Sanitize headers
-  const sanitizedHeaders = [];
-  const headerCount = {};
-
-  rawHeaders.forEach((h, idx) => {
-    let name = (h !== undefined && h !== null && String(h).trim() !== '') 
-      ? String(h).trim() 
-      : `Column ${idx + 1}`;
-    
-    // De-duplicate column names
-    if (headerCount[name]) {
-      headerCount[name] += 1;
-      name = `${name}_${headerCount[name]}`;
-    } else {
-      headerCount[name] = 1;
-    }
-    sanitizedHeaders.push(name);
-  });
-
-  state.allHeaders = sanitizedHeaders;
-
-  // Normalize row length to match headers length
-  state.rawRows = rawRows.map((row, rowIdx) => {
-    const normalized = [];
-    for (let c = 0; c < sanitizedHeaders.length; c++) {
-      const val = row[c];
-      normalized.push(val !== undefined && val !== null ? val : '');
-    }
-    // Store original index for row identity
-    return {
-      _originalIndex: rowIdx + 1,
-      values: normalized
-    };
-  });
-
-  // Infer column data types (numeric, date, string)
-  state.columnTypes = inferColumnTypes(state.rawRows, sanitizedHeaders.length);
-
-  // Reset controls & states
-  state.visibleColumns = new Set(sanitizedHeaders.map((_, idx) => idx));
-  state.sortColumn = null;
-  state.sortDirection = 'none';
-  state.globalSearch = '';
-  state.columnFilters = {};
-  state.currentPage = 1;
-
-  elements.globalSearchInput.value = '';
-  elements.clearSearchBtn.classList.add('hidden');
-
-  // Update UI headers & views
-  elements.activeFilename.textContent = state.fileName;
-  elements.uploadBtnText.textContent = 'Change File';
-  elements.rowCountBadge.textContent = `${state.rawRows.length} rows`;
-  elements.colCountBadge.textContent = `${state.allHeaders.length} cols`;
-
-  elements.columnsBtn.disabled = false;
-  elements.exportCsvBtn.disabled = false;
-  elements.fileMeta.classList.remove('hidden');
-
-  elements.uploadView.classList.add('hidden');
-  elements.tableView.classList.remove('hidden');
-
-  renderTableHeader();
-  renderColumnsList();
-  applyFiltersAndSort();
-}
-
-function inferColumnTypes(rows, colCount) {
-  const types = [];
-  for (let c = 0; c < colCount; c++) {
-    let nonEmpties = 0;
-    let numericCount = 0;
-    for (let r = 0; r < Math.min(rows.length, 50); r++) {
-      const val = rows[r].values[c];
-      if (val !== '' && val !== null && val !== undefined) {
-        nonEmpties++;
-        const str = String(val).trim().replace(/^[$,€£¥]/, '');
-        if (!isNaN(str) && !isNaN(parseFloat(str))) {
-          numericCount++;
-        }
-      }
-    }
-    types.push(nonEmpties > 0 && numericCount / nonEmpties > 0.8 ? 'numeric' : 'text');
-  }
-  return types;
-}
-
 // ==========================================================================
-// Filtering & Sorting Engine
+// Query & Worker Communication
 // ==========================================================================
-function applyFiltersAndSort() {
-  const { rawRows, globalSearch, columnFilters, sortColumn, sortDirection } = state;
-  const colFilterEntries = Object.entries(columnFilters).filter(([_, q]) => q && q.trim() !== '');
-  const hasGlobalSearch = globalSearch.length > 0;
-  const globalLower = globalSearch.toLowerCase();
-
-  // 1. Filtering
-  let result = rawRows.filter((row) => {
-    // Check Global Search across visible columns
-    if (hasGlobalSearch) {
-      let matchedGlobal = false;
-      for (const colIdx of state.visibleColumns) {
-        const cellStr = String(row.values[colIdx]).toLowerCase();
-        if (cellStr.includes(globalLower)) {
-          matchedGlobal = true;
-          break;
-        }
-      }
-      if (!matchedGlobal) return false;
-    }
-
-    // Check Column-specific Filters
-    for (const [colIndexStr, query] of colFilterEntries) {
-      const colIdx = parseInt(colIndexStr, 10);
-      const queryLower = query.toLowerCase().trim();
-      const cellStr = String(row.values[colIdx]).toLowerCase();
-      if (!cellStr.includes(queryLower)) {
-        return false;
-      }
-    }
-
-    return true;
-  });
-
-  // 2. Sorting
-  if (sortColumn !== null && sortDirection !== 'none') {
-    const isAsc = sortDirection === 'asc';
-    const isNumericCol = state.columnTypes[sortColumn] === 'numeric';
-
-    result = [...result].sort((a, b) => {
-      const valA = a.values[sortColumn];
-      const valB = b.values[sortColumn];
-
-      // Handle null/empty sorting: blanks always go to the bottom
-      const emptyA = valA === '' || valA === null || valA === undefined;
-      const emptyB = valB === '' || valB === null || valB === undefined;
-      if (emptyA && emptyB) return 0;
-      if (emptyA) return 1;
-      if (emptyB) return -1;
-
-      if (isNumericCol) {
-        const numA = parseFloat(String(valA).replace(/[^0-9.-]+/g, ''));
-        const numB = parseFloat(String(valB).replace(/[^0-9.-]+/g, ''));
-        if (!isNaN(numA) && !isNaN(numB)) {
-          return isAsc ? numA - numB : numB - numA;
-        }
-      }
-
-      // Natural string comparison
-      const strA = String(valA);
-      const strB = String(valB);
-      const cmp = strA.localeCompare(strB, undefined, { numeric: true, sensitivity: 'base' });
-      return isAsc ? cmp : -cmp;
-    });
+function queryWorker(pageOverride) {
+  if (pageOverride !== undefined) {
+    state.currentPage = pageOverride;
   }
 
-  state.filteredRows = result;
-
-  // Update Active Filters Chips Bar
   updateFilterChips();
+  updateSortHeadersUI();
 
-  // Update Status count
-  const total = rawRows.length;
-  const filtered = result.length;
-  if (filtered < total) {
-    elements.statusCount.textContent = `Showing ${filtered.toLocaleString()} of ${total.toLocaleString()} rows (Filtered)`;
+  if (state.pageSize === Infinity && (!pageOverride || pageOverride === 1)) {
+    elements.tableScrollContainer.scrollTop = 0;
+  }
+
+  worker.postMessage({
+    type: 'QUERY',
+    payload: {
+      sortCol: state.sortColumn,
+      sortDir: state.sortDirection,
+      globalSearch: state.globalSearch,
+      colFilters: state.columnFilters,
+      columnValueFilters: state.columnValueFilters,
+      page: state.currentPage,
+      pageSize: state.pageSize,
+      isAppend: false,
+      visibleCols: Array.from(state.visibleColumns)
+    }
+  });
+}
+
+function handleQueryResult(data) {
+  state.currentPage = data.page || 1;
+  state.filteredCount = data.filteredCount;
+
+  const hasAnyFilter = data.filteredCount < state.totalRows;
+  if (hasAnyFilter) {
+    elements.statusCount.textContent = `Showing ${data.filteredCount.toLocaleString()} of ${state.totalRows.toLocaleString()} rows (Filtered)`;
     elements.resetAllFiltersBtn.classList.remove('hidden');
   } else {
-    elements.statusCount.textContent = `Showing all ${total.toLocaleString()} rows`;
-    elements.resetAllFiltersBtn.classList.toggle('hidden', sortDirection === 'none');
+    elements.statusCount.textContent = `Showing all ${state.totalRows.toLocaleString()} rows`;
+    elements.resetAllFiltersBtn.classList.toggle('hidden', state.sortDirection === 'none');
   }
 
-  // Adjust pagination if page out of bounds
-  const totalPages = getTotalPages();
-  if (state.currentPage > totalPages) {
-    state.currentPage = Math.max(1, totalPages);
+  if (state.pageSize === Infinity) {
+    virtualState.cacheOffset = data.offset || 0;
+    virtualState.cacheRows = data.rows || [];
+    virtualState.isFetchingWindow = false;
+    virtualState.lastRequestedOffset = virtualState.cacheOffset;
+    renderVirtualWindow();
+  } else {
+    renderTableBody(data.rows);
   }
 
-  // Render Table Body & UI
-  renderTableBody();
   updatePaginationUI();
-  updateSortHeadersUI();
 }
 
 function resetAllFilters() {
@@ -512,6 +1175,9 @@ function resetAllFilters() {
   elements.clearSearchBtn.classList.add('hidden');
 
   state.columnFilters = {};
+  state.columnValueFilters = {};
+  closeExcelFilterPopover();
+
   document.querySelectorAll('.col-filter-input').forEach((inp) => {
     inp.value = '';
     inp.classList.remove('has-value');
@@ -521,12 +1187,15 @@ function resetAllFilters() {
   state.sortDirection = 'none';
   state.currentPage = 1;
 
-  applyFiltersAndSort();
+  renderTableHeader();
+  queryWorker(1);
   showToast('All filters and sorting reset.', 'info');
 }
 
 function updateFilterChips() {
   const chips = [];
+
+  // Global search chip
   if (state.globalSearch) {
     chips.push({
       label: `Search: "${state.globalSearch}"`,
@@ -534,17 +1203,18 @@ function updateFilterChips() {
         state.globalSearch = '';
         elements.globalSearchInput.value = '';
         elements.clearSearchBtn.classList.add('hidden');
-        applyFiltersAndSort();
+        queryWorker(1);
       }
     });
   }
 
+  // Inline column filter chips
   Object.entries(state.columnFilters).forEach(([colIdxStr, query]) => {
     if (query && query.trim()) {
       const idx = parseInt(colIdxStr, 10);
       const colName = state.allHeaders[idx] || `Col ${idx + 1}`;
       chips.push({
-        label: `${colName}: "${query}"`,
+        label: `${colName} contains "${query}"`,
         remove: () => {
           delete state.columnFilters[idx];
           const inp = document.getElementById(`col-filter-inp-${idx}`);
@@ -552,12 +1222,38 @@ function updateFilterChips() {
             inp.value = '';
             inp.classList.remove('has-value');
           }
-          applyFiltersAndSort();
+          queryWorker(1);
         }
       });
     }
   });
 
+  // Excel unique values checklist chips
+  Object.entries(state.columnValueFilters).forEach(([colIdxStr, allowedList]) => {
+    const idx = parseInt(colIdxStr, 10);
+    const colName = state.allHeaders[idx] || `Col ${idx + 1}`;
+    const totalDistinct = cachedUniqueValues.get(idx)?.length;
+    let label;
+
+    if (allowedList.length === 1) {
+      label = `${colName} = "${allowedList[0] === '' ? '(Blanks)' : allowedList[0]}"`;
+    } else if (totalDistinct) {
+      label = `${colName}: ${allowedList.length} of ${totalDistinct} values`;
+    } else {
+      label = `${colName}: ${allowedList.length} values`;
+    }
+
+    chips.push({
+      label,
+      remove: () => {
+        delete state.columnValueFilters[idx];
+        renderTableHeader();
+        queryWorker(1);
+      }
+    });
+  });
+
+  // Sort chip
   if (state.sortColumn !== null && state.sortDirection !== 'none') {
     const colName = state.allHeaders[state.sortColumn] || `Col ${state.sortColumn + 1}`;
     const arrow = state.sortDirection === 'asc' ? '↑' : '↓';
@@ -566,7 +1262,7 @@ function updateFilterChips() {
       remove: () => {
         state.sortColumn = null;
         state.sortDirection = 'none';
-        applyFiltersAndSort();
+        queryWorker(1);
       }
     });
   }
@@ -587,7 +1283,7 @@ function updateFilterChips() {
 }
 
 // ==========================================================================
-// Table Rendering (Header, Filter Row, Body)
+// Table Header & Rows Rendering
 // ==========================================================================
 function renderTableHeader() {
   elements.tableHead.innerHTML = '';
@@ -602,7 +1298,6 @@ function renderTableHeader() {
   thIndex.textContent = '#';
   trTitle.appendChild(thIndex);
 
-  // Each header column
   state.allHeaders.forEach((headerName, idx) => {
     if (!state.visibleColumns.has(idx)) return;
 
@@ -618,13 +1313,32 @@ function renderTableHeader() {
     titleSpan.className = 'th-title';
     titleSpan.textContent = headerName;
 
+    // Right action icons (Excel filter funnel button + sort indicator)
+    const thActions = document.createElement('div');
+    thActions.className = 'th-actions';
+
+    const filterBtn = document.createElement('button');
+    filterBtn.type = 'button';
+    const hasValueFilter = Boolean(state.columnValueFilters[idx]);
+    filterBtn.className = 'th-filter-btn' + (hasValueFilter ? ' has-filter' : '');
+    filterBtn.title = `Filter unique values in "${headerName}"`;
+    filterBtn.innerHTML = getFilterFunnelSvg(hasValueFilter);
+
+    filterBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openExcelFilterPopover(idx, filterBtn);
+    });
+
     const sortIcon = document.createElement('span');
     sortIcon.className = 'sort-icon';
     sortIcon.id = `sort-icon-${idx}`;
     sortIcon.innerHTML = getSortIconSvg('none');
 
+    thActions.appendChild(filterBtn);
+    thActions.appendChild(sortIcon);
+
     contentDiv.appendChild(titleSpan);
-    contentDiv.appendChild(sortIcon);
+    contentDiv.appendChild(thActions);
     th.appendChild(contentDiv);
 
     th.addEventListener('click', () => handleHeaderSortClick(idx));
@@ -633,7 +1347,7 @@ function renderTableHeader() {
 
   elements.tableHead.appendChild(trTitle);
 
-  // 2. Column Filters Row
+  // 2. Column Inline Filters Row
   const trFilter = document.createElement('tr');
   trFilter.className = 'filter-row';
   trFilter.id = 'sub-filter-row';
@@ -641,12 +1355,12 @@ function renderTableHeader() {
     trFilter.classList.add('hidden');
   }
 
-  // Filter cell for index
   const tdIndexFilter = document.createElement('th');
   tdIndexFilter.className = 'filter-cell';
   tdIndexFilter.innerHTML = '<span style="font-size: 0.7rem; color: var(--text-muted);">Filter</span>';
   trFilter.appendChild(tdIndexFilter);
 
+  let colFilterTimer;
   state.allHeaders.forEach((headerName, idx) => {
     if (!state.visibleColumns.has(idx)) return;
 
@@ -657,7 +1371,7 @@ function renderTableHeader() {
     input.type = 'text';
     input.className = 'col-filter-input';
     input.id = `col-filter-inp-${idx}`;
-    input.placeholder = `Filter ${headerName}...`;
+    input.placeholder = `Contains...`;
     input.value = state.columnFilters[idx] || '';
     if (input.value) input.classList.add('has-value');
 
@@ -670,8 +1384,12 @@ function renderTableHeader() {
         delete state.columnFilters[idx];
         input.classList.remove('has-value');
       }
-      state.currentPage = 1;
-      applyFiltersAndSort();
+
+      clearTimeout(colFilterTimer);
+      colFilterTimer = setTimeout(() => {
+        state.currentPage = 1;
+        queryWorker(1);
+      }, 120);
     });
 
     td.appendChild(input);
@@ -696,8 +1414,7 @@ function handleHeaderSortClick(colIdx) {
     state.sortDirection = 'asc';
   }
 
-  state.currentPage = 1;
-  applyFiltersAndSort();
+  queryWorker(1);
 }
 
 function updateSortHeadersUI() {
@@ -723,113 +1440,57 @@ function getSortIconSvg(direction) {
   if (direction === 'desc') {
     return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
   }
-  // Neutral / inactive sort
   return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.35;"><polyline points="7 15 12 20 17 15"></polyline><polyline points="7 9 12 4 17 9"></polyline></svg>`;
 }
 
-function renderTableBody() {
-  elements.tableBody.innerHTML = '';
-  const rows = state.filteredRows;
+function getFilterFunnelSvg(isActive) {
+  if (isActive) {
+    return `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>`;
+  }
+  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>`;
+}
 
-  if (rows.length === 0) {
+function renderTableBody(rows) {
+  elements.tableBody.innerHTML = '';
+  domPool.isInitialized = false;
+
+  if (!rows || rows.length === 0) {
     elements.noResults.classList.remove('hidden');
     return;
   }
   elements.noResults.classList.add('hidden');
 
-  // Compute pagination range
-  const pageSize = state.pageSize;
-  let startIdx = 0;
-  let endIdx = rows.length;
-
-  if (pageSize !== Infinity) {
-    startIdx = (state.currentPage - 1) * pageSize;
-    endIdx = Math.min(startIdx + pageSize, rows.length);
-  }
-
-  const pageRows = rows.slice(startIdx, endIdx);
   const fragment = document.createDocumentFragment();
-
-  pageRows.forEach((rowRecord) => {
-    const tr = document.createElement('tr');
-    tr.className = 'tb-row';
-
-    // Index Column Cell
-    const tdIndex = document.createElement('td');
-    tdIndex.className = 'td-cell';
-    tdIndex.textContent = rowRecord._originalIndex;
-    tr.appendChild(tdIndex);
-
-    // Visible Data Cells
-    state.allHeaders.forEach((_, colIdx) => {
-      if (!state.visibleColumns.has(colIdx)) return;
-
-      const td = document.createElement('td');
-      td.className = 'td-cell';
-      const cellVal = rowRecord.values[colIdx];
-      const colType = state.columnTypes[colIdx];
-
-      formatCellContent(td, cellVal, colType);
-
-      // Click to copy value
-      td.addEventListener('dblclick', () => {
-        copyCell(cellVal);
-      });
-
-      tr.appendChild(td);
-    });
-
-    fragment.appendChild(tr);
+  rows.forEach((rowRecord) => {
+    fragment.appendChild(createTableRow(rowRecord));
   });
-
   elements.tableBody.appendChild(fragment);
 }
 
-function formatCellContent(td, val, colType) {
-  if (val === '' || val === null || val === undefined) {
-    td.className += ' td-empty';
-    td.textContent = '—';
-    return;
-  }
+function createTableRow(rowRecord) {
+  const tr = document.createElement('tr');
+  tr.className = 'tb-row';
 
-  const str = String(val);
+  // Row index cell (#)
+  const tdIndex = document.createElement('td');
+  tdIndex.className = 'td-cell td-row-index';
+  tdIndex.textContent = rowRecord._originalIndex;
+  tr.appendChild(tdIndex);
 
-  // Status detection (e.g. Delivered, Processing, Cancelled, Shipped, Active, Yes, No)
-  const lower = str.toLowerCase().trim();
-  if (['delivered', 'completed', 'active', 'success', 'paid', 'yes', 'true'].includes(lower)) {
-    td.innerHTML = `<span class="status-pill status-success">${escapeHtml(str)}</span>`;
-    return;
-  }
-  if (['processing', 'pending', 'in progress', 'warning'].includes(lower)) {
-    td.innerHTML = `<span class="status-pill status-warning">${escapeHtml(str)}</span>`;
-    return;
-  }
-  if (['cancelled', 'failed', 'inactive', 'rejected', 'error', 'no', 'false'].includes(lower)) {
-    td.innerHTML = `<span class="status-pill status-danger">${escapeHtml(str)}</span>`;
-    return;
-  }
-  if (['shipped', 'open', 'info'].includes(lower)) {
-    td.innerHTML = `<span class="status-pill status-info">${escapeHtml(str)}</span>`;
-    return;
-  }
+  // Visible cells
+  state.allHeaders.forEach((_, colIdx) => {
+    if (!state.visibleColumns.has(colIdx)) return;
 
-  // URL detection
-  if (/^https?:\/\//i.test(str)) {
-    td.innerHTML = `<a href="${escapeHtml(str)}" target="_blank" rel="noopener noreferrer" class="td-link">${escapeHtml(str)}</a>`;
-    return;
-  }
+    const td = document.createElement('td');
+    td.className = 'td-cell';
+    const cellVal = rowRecord.values[colIdx];
+    const colType = state.columnTypes[colIdx];
 
-  // Number formatting
-  if (colType === 'numeric' || (!isNaN(str) && !isNaN(parseFloat(str)) && !str.includes('-') && str.length < 15)) {
-    td.className += ' td-number';
-    td.textContent = str;
-    td.title = str;
-    return;
-  }
+    updateCellDomContent(td, cellVal, colType);
+    tr.appendChild(td);
+  });
 
-  // Default string
-  td.textContent = str;
-  td.title = str;
+  return tr;
 }
 
 function copyCell(text) {
@@ -883,13 +1544,15 @@ function renderColumnsList(filterQuery = '') {
 }
 
 function updateColumnsVisibility() {
-  // Update Columns button text badge
-  elements.columnsBtnText.textContent = `Columns (${state.visibleColumns.size}/${state.allHeaders.length})`;
-
-  // Re-render table header and body with the new visible columns
+  domPool.isInitialized = false;
+  updateColumnsVisibilityBadge();
   renderTableHeader();
   renderColumnsList(elements.columnSearchInput.value.trim().toLowerCase());
-  applyFiltersAndSort();
+  queryWorker();
+}
+
+function updateColumnsVisibilityBadge() {
+  elements.columnsBtnText.textContent = `Columns (${state.visibleColumns.size}/${state.allHeaders.length})`;
 }
 
 // ==========================================================================
@@ -897,7 +1560,7 @@ function updateColumnsVisibility() {
 // ==========================================================================
 function getTotalPages() {
   if (state.pageSize === Infinity) return 1;
-  const count = state.filteredRows.length;
+  const count = state.filteredCount;
   return Math.max(1, Math.ceil(count / state.pageSize));
 }
 
@@ -905,16 +1568,33 @@ function goToPage(page) {
   const totalPages = getTotalPages();
   if (page < 1 || page > totalPages) return;
   state.currentPage = page;
-  renderTableBody();
-  updatePaginationUI();
+  queryWorker(page);
 }
 
 function updatePaginationUI() {
-  const totalRows = state.filteredRows.length;
+  const totalRows = state.filteredCount;
   const totalPages = getTotalPages();
   const page = state.currentPage;
 
-  // Buttons disabled states
+  // In virtual scroll mode
+  if (state.pageSize === Infinity) {
+    elements.pageButtons.classList.add('hidden');
+    elements.infiniteBadge.classList.remove('hidden');
+
+    if (totalRows === 0) {
+      elements.pageRecordsSummary.textContent = 'Showing 0 records';
+    } else {
+      const vStart = Math.min(totalRows, virtualState.viewportStartIndex + 1);
+      const vEnd = Math.min(totalRows, virtualState.viewportEndIndex);
+      elements.pageRecordsSummary.textContent = `Viewing rows ${vStart.toLocaleString()}–${vEnd.toLocaleString()} of ${totalRows.toLocaleString()} (Virtual Scroll)`;
+    }
+    return;
+  }
+
+  // Fixed page size mode
+  elements.pageButtons.classList.remove('hidden');
+  elements.infiniteBadge.classList.add('hidden');
+
   elements.firstPageBtn.disabled = page <= 1;
   elements.prevPageBtn.disabled = page <= 1;
   elements.nextPageBtn.disabled = page >= totalPages;
@@ -927,50 +1607,25 @@ function updatePaginationUI() {
     return;
   }
 
-  if (state.pageSize === Infinity) {
-    elements.pageRecordsSummary.textContent = `Showing all ${totalRows.toLocaleString()} rows`;
-  } else {
-    const start = (page - 1) * state.pageSize + 1;
-    const end = Math.min(page * state.pageSize, totalRows);
-    elements.pageRecordsSummary.textContent = `Showing ${start}–${end} of ${totalRows.toLocaleString()} rows`;
-  }
+  const start = (page - 1) * state.pageSize + 1;
+  const end = Math.min(page * state.pageSize, totalRows);
+  elements.pageRecordsSummary.textContent = `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${totalRows.toLocaleString()} rows`;
 }
 
 // ==========================================================================
-// Export visible data to CSV
+// Export CSV Result Handling
 // ==========================================================================
-function exportVisibleToCsv() {
-  const visibleColIndices = Array.from(state.visibleColumns).sort((a, b) => a - b);
-  if (visibleColIndices.length === 0 || state.filteredRows.length === 0) {
-    showToast('No data available to export.', 'error');
-    return;
-  }
-
-  // Export headers
-  const csvHeaders = visibleColIndices.map((idx) => state.allHeaders[idx]);
-
-  // Export rows
-  const csvRows = state.filteredRows.map((row) => {
-    return visibleColIndices.map((idx) => row.values[idx]);
-  });
-
-  const sheetData = [csvHeaders, ...csvRows];
-  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-  const csvOutput = XLSX.utils.sheet_to_csv(worksheet);
-
-  // Download blob
-  const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+function handleExportCsvResult({ blob, fileName, count }) {
+  hideLoading();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const baseName = (state.fileName || 'export').replace(/\.[^/.]+$/, '');
-  a.download = `${baseName}_filtered.csv`;
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-
-  showToast(`Exported ${state.filteredRows.length} rows to CSV!`, 'success');
+  showToast(`Exported ${count.toLocaleString()} rows to CSV!`, 'success');
 }
 
 // ==========================================================================
@@ -991,7 +1646,7 @@ function showToast(message, type = 'info') {
         toast.parentNode.removeChild(toast);
       }
     }, 250);
-  }, 3200);
+  }, 3400);
 }
 
 function escapeHtml(str) {
