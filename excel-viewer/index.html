@@ -349,6 +349,44 @@
 
       <div class="popover-divider"></div>
 
+      <!-- Number Filters (Shown dynamically for Numeric Columns) -->
+      <div class="popover-num-section hidden" id="popover-num-section">
+        <div class="popover-section-header">
+          <span class="popover-section-label">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="4" y1="9" x2="20" y2="9"></line>
+              <line x1="4" y1="15" x2="20" y2="15"></line>
+              <line x1="10" y1="3" x2="8" y2="21"></line>
+              <line x1="16" y1="3" x2="14" y2="21"></line>
+            </svg>
+            Number Filter
+          </span>
+          <button type="button" class="btn-text btn-xs hidden" id="popover-num-clear-btn" title="Clear number filter">Clear</button>
+        </div>
+        <div class="num-filter-form">
+          <div class="num-filter-controls">
+            <select id="popover-num-op-select" class="num-op-select">
+              <option value=">">&gt; Greater than</option>
+              <option value=">=">&gt;= Greater or equal</option>
+              <option value="<">&lt; Less than</option>
+              <option value="<=">&lt;= Less or equal</option>
+              <option value="=">= Equals</option>
+              <option value="!=">!= Does not equal</option>
+              <option value="between">Between...</option>
+            </select>
+            <input type="text" id="popover-num-val1" class="num-filter-input" placeholder="Value (e.g. 100)" />
+          </div>
+          <div class="num-filter-between-row hidden" id="popover-num-between-row">
+            <span class="num-and-label">and</span>
+            <input type="text" id="popover-num-val2" class="num-filter-input" placeholder="Value (e.g. 500)" />
+          </div>
+          <div class="num-filter-actions">
+            <button type="button" class="btn btn-sm btn-primary" id="popover-num-apply-btn">Apply Number Filter</button>
+          </div>
+        </div>
+        <div class="popover-divider"></div>
+      </div>
+
       <!-- Search in Values -->
       <div class="popover-search">
         <input type="text" id="popover-search-input" placeholder="Search unique values..." autocomplete="off" />

@@ -395,16 +395,115 @@ function handleQueryWindow({ offset, limit }) {
   });
 }
 
+// ==========================================================================
+// Numeric Filter Helpers (Supports >, >=, =, ==, <, <=, !=, <>, and, ranges)
+// ==========================================================================
+function parseNumericValue(val) {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  if (val === null || val === undefined || val === '') return null;
+  const s = String(val).trim();
+  const cleaned = s.replace(/^[^\d\-+.]+/, '').replace(/[^\d.+-]+$/, '').replace(/,/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function cleanNumberTarget(valStr) {
+  if (!valStr) return null;
+  let s = valStr.trim().replace(/^[$,€£¥\s]+/, '').replace(/,/g, '');
+  let multiplier = 1;
+  if (/[kK]$/.test(s)) {
+    multiplier = 1000;
+    s = s.slice(0, -1);
+  } else if (/[mM]$/.test(s)) {
+    multiplier = 1000000;
+    s = s.slice(0, -1);
+  } else if (/[bB]$/.test(s)) {
+    multiplier = 1000000000;
+    s = s.slice(0, -1);
+  } else if (/%$/.test(s)) {
+    s = s.slice(0, -1);
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n * multiplier : null;
+}
+
+function parseNumericFilterConditions(query) {
+  if (!query || typeof query !== 'string') return null;
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  // Check for range format like "10..50"
+  const rangeMatch = trimmed.match(/^([+-]?[$,€£¥]?\s*[\d,]+(?:\.\d+)?(?:[kKmMbB]|%)?)\s*\.\.\s*([+-]?[$,€£¥]?\s*[\d,]+(?:\.\d+)?(?:[kKmMbB]|%)?)$/);
+  if (rangeMatch) {
+    const v1 = cleanNumberTarget(rangeMatch[1]);
+    const v2 = cleanNumberTarget(rangeMatch[2]);
+    if (v1 !== null && v2 !== null) {
+      return [
+        { op: '>=', val: Math.min(v1, v2) },
+        { op: '<=', val: Math.max(v1, v2) }
+      ];
+    }
+  }
+
+  // Split clauses by 'and', 'AND', '&&', ',', or boundary before operator
+  const rawParts = trimmed.split(/\s+(?:and|AND|&&)\s+|,\s*|\s+(?=[><=!])/);
+  const conditions = [];
+
+  for (const part of rawParts) {
+    const p = part.trim();
+    if (!p) continue;
+    const match = p.match(/^(>=|<=|!=|<>|==|>|<|=)\s*(.+)$/);
+    if (!match) {
+      return null;
+    }
+    const op = match[1];
+    const target = cleanNumberTarget(match[2]);
+    if (target === null) {
+      return null;
+    }
+    conditions.push({ op, val: target });
+  }
+
+  return conditions.length > 0 ? conditions : null;
+}
+
+function evalNumericCondition(cellNum, op, targetNum) {
+  switch (op) {
+    case '>':
+      return cellNum > targetNum;
+    case '>=':
+      return cellNum >= targetNum;
+    case '<':
+      return cellNum < targetNum;
+    case '<=':
+      return cellNum <= targetNum;
+    case '=':
+    case '==':
+      return Math.abs(cellNum - targetNum) < 1e-9;
+    case '!=':
+    case '<>':
+      return Math.abs(cellNum - targetNum) >= 1e-9;
+    default:
+      return false;
+  }
+}
+
 function handleQuery({ sortCol, sortDir, globalSearch, colFilters, columnValueFilters, page, pageSize, isAppend, visibleCols }) {
   const hasGlobalSearch = Boolean(globalSearch && globalSearch.trim());
   const globalLower = hasGlobalSearch ? globalSearch.trim().toLowerCase() : '';
 
   const colFilterEntries = Object.entries(colFilters || {})
     .filter(([_, q]) => q && q.trim())
-    .map(([colIdx, q]) => ({
-      col: parseInt(colIdx, 10),
-      queryLower: q.trim().toLowerCase()
-    }));
+    .map(([colIdx, q]) => {
+      const col = parseInt(colIdx, 10);
+      const queryTrimmed = q.trim();
+      const numConditions = parseNumericFilterConditions(queryTrimmed);
+      return {
+        col,
+        queryLower: queryTrimmed.toLowerCase(),
+        numConditions
+      };
+    });
 
   const colValFilterEntries = Object.entries(columnValueFilters || {})
     .filter(([_, allowedList]) => Array.isArray(allowedList))
@@ -448,24 +547,44 @@ function handleQuery({ sortCol, sortDir, globalSearch, colFilters, columnValueFi
       if (!found) continue;
     }
 
-    // Column-specific substring filter checks
+    // Column-specific filter checks (supports >, >=, =, <, <=, !=, and, ranges, and text search)
     if (colFilterEntries.length > 0) {
       let matchesAll = true;
       for (let f = 0; f < colFilterEntries.length; f++) {
-        const { col, queryLower } = colFilterEntries[f];
+        const { col, queryLower, numConditions } = colFilterEntries[f];
         const val = row[col];
-        if (val === '' || val === null || val === undefined) {
-          matchesAll = false;
-          break;
-        }
-        if (typeof val === 'number') {
-          if (!String(val).includes(queryLower)) {
+
+        if (numConditions && numConditions.length > 0) {
+          const num = parseNumericValue(val);
+          if (num === null) {
             matchesAll = false;
             break;
           }
-        } else if (!String(val).toLowerCase().includes(queryLower)) {
-          matchesAll = false;
-          break;
+          let condPass = true;
+          for (let c = 0; c < numConditions.length; c++) {
+            if (!evalNumericCondition(num, numConditions[c].op, numConditions[c].val)) {
+              condPass = false;
+              break;
+            }
+          }
+          if (!condPass) {
+            matchesAll = false;
+            break;
+          }
+        } else {
+          if (val === '' || val === null || val === undefined) {
+            matchesAll = false;
+            break;
+          }
+          if (typeof val === 'number') {
+            if (!String(val).includes(queryLower)) {
+              matchesAll = false;
+              break;
+            }
+          } else if (!String(val).toLowerCase().includes(queryLower)) {
+            matchesAll = false;
+            break;
+          }
         }
       }
       if (!matchesAll) continue;

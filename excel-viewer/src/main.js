@@ -128,7 +128,108 @@ const elements = {
   popoverTruncateBanner: document.getElementById('popover-truncate-banner'),
   popoverCancelBtn: document.getElementById('popover-cancel-btn'),
   popoverApplyBtn: document.getElementById('popover-apply-btn'),
+  // Number Filter Elements in Popover
+  popoverNumSection: document.getElementById('popover-num-section'),
+  popoverNumClearBtn: document.getElementById('popover-num-clear-btn'),
+  popoverNumOpSelect: document.getElementById('popover-num-op-select'),
+  popoverNumVal1: document.getElementById('popover-num-val1'),
+  popoverNumVal2: document.getElementById('popover-num-val2'),
+  popoverNumBetweenRow: document.getElementById('popover-num-between-row'),
+  popoverNumApplyBtn: document.getElementById('popover-num-apply-btn'),
 };
+
+// ==========================================================================
+// Numeric Filter Helpers (Supports >, >=, =, ==, <, <=, !=, <>, and, ranges)
+// ==========================================================================
+function parseNumericValue(val) {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  if (val === null || val === undefined || val === '') return null;
+  const s = String(val).trim();
+  const cleaned = s.replace(/^[^\d\-+.]+/, '').replace(/[^\d.+-]+$/, '').replace(/,/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function cleanNumberTarget(valStr) {
+  if (!valStr) return null;
+  let s = valStr.trim().replace(/^[$,€£¥\s]+/, '').replace(/,/g, '');
+  let multiplier = 1;
+  if (/[kK]$/.test(s)) {
+    multiplier = 1000;
+    s = s.slice(0, -1);
+  } else if (/[mM]$/.test(s)) {
+    multiplier = 1000000;
+    s = s.slice(0, -1);
+  } else if (/[bB]$/.test(s)) {
+    multiplier = 1000000000;
+    s = s.slice(0, -1);
+  } else if (/%$/.test(s)) {
+    s = s.slice(0, -1);
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n * multiplier : null;
+}
+
+function parseNumericFilterConditions(query) {
+  if (!query || typeof query !== 'string') return null;
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  // Check for range format like "10..50"
+  const rangeMatch = trimmed.match(/^([+-]?[$,€£¥]?\s*[\d,]+(?:\.\d+)?(?:[kKmMbB]|%)?)\s*\.\.\s*([+-]?[$,€£¥]?\s*[\d,]+(?:\.\d+)?(?:[kKmMbB]|%)?)$/);
+  if (rangeMatch) {
+    const v1 = cleanNumberTarget(rangeMatch[1]);
+    const v2 = cleanNumberTarget(rangeMatch[2]);
+    if (v1 !== null && v2 !== null) {
+      return [
+        { op: '>=', val: Math.min(v1, v2) },
+        { op: '<=', val: Math.max(v1, v2) }
+      ];
+    }
+  }
+
+  // Split clauses by 'and', 'AND', '&&', ',', or boundary before operator
+  const rawParts = trimmed.split(/\s+(?:and|AND|&&)\s+|,\s*|\s+(?=[><=!])/);
+  const conditions = [];
+
+  for (const part of rawParts) {
+    const p = part.trim();
+    if (!p) continue;
+    const match = p.match(/^(>=|<=|!=|<>|==|>|<|=)\s*(.+)$/);
+    if (!match) {
+      return null;
+    }
+    const op = match[1];
+    const target = cleanNumberTarget(match[2]);
+    if (target === null) {
+      return null;
+    }
+    conditions.push({ op, val: target });
+  }
+
+  return conditions.length > 0 ? conditions : null;
+}
+
+function evalNumericCondition(cellNum, op, targetNum) {
+  switch (op) {
+    case '>':
+      return cellNum > targetNum;
+    case '>=':
+      return cellNum >= targetNum;
+    case '<':
+      return cellNum < targetNum;
+    case '<=':
+      return cellNum <= targetNum;
+    case '=':
+    case '==':
+      return Math.abs(cellNum - targetNum) < 1e-9;
+    case '!=':
+    case '<>':
+      return Math.abs(cellNum - targetNum) >= 1e-9;
+    default:
+      return false;
+  }
+}
 
 // ==========================================================================
 // Initialization & Worker Listeners
@@ -437,6 +538,61 @@ function bindPopoverEvents() {
     renderTableHeader();
     queryWorker(1);
   });
+
+  // Number Filter in Popover
+  elements.popoverNumOpSelect.addEventListener('change', (e) => {
+    const isBetween = e.target.value === 'between';
+    elements.popoverNumBetweenRow.classList.toggle('hidden', !isBetween);
+  });
+
+  elements.popoverNumApplyBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+    const op = elements.popoverNumOpSelect.value;
+    const v1 = elements.popoverNumVal1.value.trim();
+    const v2 = elements.popoverNumVal2.value.trim();
+
+    if (!v1 && op !== 'between') return;
+
+    let query = '';
+    if (op === 'between') {
+      if (!v1 || !v2) return;
+      query = `>= ${v1} and <= ${v2}`;
+    } else {
+      query = `${op} ${v1}`;
+    }
+
+    state.columnFilters[activePopoverColIdx] = query;
+    const inp = document.getElementById(`col-filter-inp-${activePopoverColIdx}`);
+    if (inp) {
+      inp.value = query;
+      inp.classList.add('has-value');
+    }
+
+    closeExcelFilterPopover();
+    renderTableHeader();
+    queryWorker(1);
+  });
+
+  elements.popoverNumClearBtn.addEventListener('click', () => {
+    if (activePopoverColIdx === null) return;
+    delete state.columnFilters[activePopoverColIdx];
+    const inp = document.getElementById(`col-filter-inp-${activePopoverColIdx}`);
+    if (inp) {
+      inp.value = '';
+      inp.classList.remove('has-value');
+    }
+    closeExcelFilterPopover();
+    renderTableHeader();
+    queryWorker(1);
+  });
+
+  const onNumInputKeydown = (e) => {
+    if (e.key === 'Enter') {
+      elements.popoverNumApplyBtn.click();
+    }
+  };
+  elements.popoverNumVal1.addEventListener('keydown', onNumInputKeydown);
+  elements.popoverNumVal2.addEventListener('keydown', onNumInputKeydown);
 }
 
 // ==========================================================================
@@ -770,6 +926,35 @@ function openExcelFilterPopover(colIdx, triggerBtn) {
   elements.popoverClearColFilterBtn.style.opacity = hasActiveFilter ? '1' : '0.4';
   elements.popoverClearColFilterBtn.style.pointerEvents = hasActiveFilter ? 'auto' : 'none';
 
+  // Toggle and initialize Number Filter section
+  const isNumeric = state.columnTypes[colIdx] === 'numeric';
+  if (isNumeric) {
+    elements.popoverNumSection.classList.remove('hidden');
+    const existingFilter = state.columnFilters[colIdx] || '';
+    const conds = parseNumericFilterConditions(existingFilter);
+    if (conds && conds.length === 2 && conds[0].op === '>=' && conds[1].op === '<=') {
+      elements.popoverNumOpSelect.value = 'between';
+      elements.popoverNumBetweenRow.classList.remove('hidden');
+      elements.popoverNumVal1.value = conds[0].val;
+      elements.popoverNumVal2.value = conds[1].val;
+      elements.popoverNumClearBtn.classList.remove('hidden');
+    } else if (conds && conds.length === 1) {
+      elements.popoverNumOpSelect.value = conds[0].op === '==' ? '=' : conds[0].op;
+      elements.popoverNumBetweenRow.classList.add('hidden');
+      elements.popoverNumVal1.value = conds[0].val;
+      elements.popoverNumVal2.value = '';
+      elements.popoverNumClearBtn.classList.remove('hidden');
+    } else {
+      elements.popoverNumOpSelect.value = '>';
+      elements.popoverNumBetweenRow.classList.add('hidden');
+      elements.popoverNumVal1.value = '';
+      elements.popoverNumVal2.value = '';
+      elements.popoverNumClearBtn.classList.toggle('hidden', !existingFilter);
+    }
+  } else {
+    elements.popoverNumSection.classList.add('hidden');
+  }
+
   if (cachedUniqueValues.has(colIdx)) {
     popoverCurrentUniqueList = cachedUniqueValues.get(colIdx);
     initPopoverSelection(colIdx);
@@ -818,12 +1003,26 @@ function initPopoverSelection(colIdx) {
 }
 
 function filterAndRenderPopoverList(searchQuery = '') {
-  const searchLower = searchQuery.trim().toLowerCase();
-  popoverFilteredList = popoverCurrentUniqueList.filter((item) => {
-    if (!searchLower) return true;
-    const str = item.value === '' ? '(blanks)' : String(item.value).toLowerCase();
-    return str.includes(searchLower);
-  });
+  const trimmed = searchQuery.trim();
+  const numConditions = parseNumericFilterConditions(trimmed);
+
+  if (numConditions && numConditions.length > 0) {
+    popoverFilteredList = popoverCurrentUniqueList.filter((item) => {
+      const num = parseNumericValue(item.value);
+      if (num === null) return false;
+      for (const cond of numConditions) {
+        if (!evalNumericCondition(num, cond.op, cond.val)) return false;
+      }
+      return true;
+    });
+  } else {
+    const searchLower = trimmed.toLowerCase();
+    popoverFilteredList = popoverCurrentUniqueList.filter((item) => {
+      if (!searchLower) return true;
+      const str = item.value === '' ? '(blanks)' : String(item.value).toLowerCase();
+      return str.includes(searchLower);
+    });
+  }
 
   elements.popoverValuesList.scrollTop = 0;
   renderPopoverChecklistVirtual();
@@ -1240,8 +1439,10 @@ function updateFilterChips() {
     if (query && query.trim()) {
       const idx = parseInt(colIdxStr, 10);
       const colName = state.allHeaders[idx] || `Col ${idx + 1}`;
+      const isNum = parseNumericFilterConditions(query);
+      const label = isNum ? `${colName}: ${query}` : `${colName} contains "${query}"`;
       chips.push({
-        label: `${colName} contains "${query}"`,
+        label,
         remove: () => {
           delete state.columnFilters[idx];
           const inp = document.getElementById(`col-filter-inp-${idx}`);
@@ -1419,7 +1620,9 @@ function renderTableHeader() {
     input.type = 'text';
     input.className = 'col-filter-input';
     input.id = `col-filter-inp-${idx}`;
-    input.placeholder = `Contains...`;
+    const isNumCol = state.columnTypes[idx] === 'numeric';
+    input.placeholder = isNumCol ? `e.g. >50, <=200, !=0` : `Contains...`;
+    input.title = isNumCol ? `Filter numbers using >, >=, =, <, <=, != or range (e.g. >10 and <50)` : `Filter text (contains substring)`;
     input.value = state.columnFilters[idx] || '';
     if (input.value) input.classList.add('has-value');
 
